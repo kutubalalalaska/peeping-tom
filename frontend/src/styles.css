@@ -1,0 +1,154 @@
+:root {
+  --ink: #1d1d1f;
+  --muted: #6b6b70;
+  --line: #e3e3de;
+  --accent: #b5462f;
+  --panel: #f7f7f4;
+  --ok: #2e7d32;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: var(--ink); background: #fff; }
+.wrap { max-width: 720px; margin: 56px auto; padding: 0 20px; }
+h1 { font-weight: 650; letter-spacing: -0.01em; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.big { font-size: 18px; font-weight: 600; margin: 0; }
+.lede { font-size: 18px; line-height: 1.6; color: #333; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 18px 0;
+}
+input, button { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); font: inherit; }
+button { background: var(--ink); color: #fff; border: none; cursor: pointer; }
+button:disabled { opacity: 0.45; cursor: default; }
+button.danger { background: var(--accent); }
+.err { color: var(--accent); }
+.ok { color: var(--ok); }
+
+/* the read / citations (result page) */
+.read { line-height: 1.65; white-space: pre-wrap; }
+.prov { margin-top: -6px; }
+.cite {
+  background: none; border: none; padding: 0; margin: 0 1px;
+  color: var(--accent); font: inherit; font-size: 0.72em; font-weight: 600;
+  vertical-align: super; cursor: pointer;
+}
+.cite:hover { text-decoration: underline; }
+.retain { font-size: 14px; }
+.retain ul { margin: 6px 0; padding-left: 18px; }
+
+/* receipt drawer (a clickable [#id] -> the real cited message) */
+.receipt-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.18);
+  display: flex; justify-content: flex-end; z-index: 50;
+}
+.receipt {
+  width: min(420px, 92vw); height: 100%; background: #fff;
+  border-left: 1px solid var(--line); padding: 24px; overflow: auto;
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.08);
+}
+.receipt-x {
+  float: right; background: none; border: none; color: var(--muted);
+  font-size: 22px; line-height: 1; padding: 0; cursor: pointer;
+}
+.receipt-head { margin-bottom: 10px; }
+.receipt-text { white-space: pre-wrap; line-height: 1.55; margin: 0 0 4px; }
+.receipt-media { margin: 14px 0 0; }
+.receipt-media img, .receipt-media video { width: 100%; border-radius: 10px; border: 1px solid var(--line); }
+.receipt-media audio { width: 100%; }
+.receipt-media figcaption { margin-top: 6px; line-height: 1.4; }
+.receipt-blind { font-style: italic; }
+
+/* landing */
+.rules ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.7; }
+
+/* source picker */
+.sources { display: flex; gap: 12px; margin: 18px 0; }
+.source {
+  flex: 1; text-align: center; padding: 16px; border-radius: 12px;
+  border: 1px solid var(--line); font-weight: 600;
+}
+.source.on { border-color: var(--ink); }
+.source.off { color: var(--muted); }
+.source.off span {
+  display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px;
+}
+
+/* platform toggle + export steps */
+.seg { display: flex; gap: 8px; }
+.seg button { flex: 1; background: #fff; color: var(--ink); border: 1px solid var(--line); }
+.seg button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.steps { margin: 4px 0 0; padding-left: 20px; line-height: 1.7; color: #333; }
+
+/* inspection stage */
+.stage { text-align: center; margin: 8px 0 4px; }
+.glimpses {
+  display: flex; justify-content: center; align-items: flex-end;
+  gap: 12px; min-height: 156px; flex-wrap: wrap;
+}
+.glimpse { margin: 0; width: 120px; animation: glimpse 4.5s ease forwards; }
+@keyframes glimpse {
+  0%   { opacity: 0; transform: translateY(8px); }
+  18%  { opacity: 1; transform: translateY(0); }
+  78%  { opacity: 1; }
+  100% { opacity: 0.18; }
+}
+.glimpse img {
+  width: 120px; height: 120px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--line);
+}
+.glimpse figcaption {
+  font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.3;
+  max-height: 30px; overflow: hidden;
+}
+.g-audio, .g-audio audio { width: 120px; }
+.g-video {
+  width: 120px; height: 120px; border-radius: 10px; border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--muted);
+}
+
+/* progress meter */
+.meter { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 14px 0 6px; }
+.pct { font-size: 22px; font-weight: 650; }
+.spinner {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+.big-spin { width: 40px; height: 40px; margin: 22px auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* role picker */
+.role .people { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.role .people button { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+.role .people button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.role .people button.on .muted { color: #cfcfcf; }
+
+/* review gate — the exact text that will cross */
+.xscript {
+  margin: 0; max-height: 320px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+  color: #333;
+}
+
+/* route picker (the read backend choice) */
+.routes .route-cards { display: flex; gap: 12px; }
+.route-card {
+  flex: 1; text-align: left; background: #fff; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.route-card.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) inset; }
+.rc-label { font-weight: 650; }
+.rc-model { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.rc-facts { margin: 4px 0 0; padding-left: 16px; font-size: 12.5px; color: #444; line-height: 1.5; }
+.route-card.on .rc-facts { color: #333; }

@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Placeholder UI. Real interactive read (clickable [#id] receipts, thumbnails, voice notes) later. -->
+<meta charset="utf-8"><title>Inward Mirror — the read</title>
+<body style="font-family:system-ui;max-width:720px;margin:60px auto;padding:0 16px">
+  <h2>The read</h2>
+  <div id="out" style="white-space:pre-wrap;line-height:1.55"></div>
+  <script>
+    const id = location.pathname.split('/').pop();
+    (async () => {
+      const r = await fetch('/api/jobs/'+id+'/result');
+      if (!r.ok){ document.getElementById('out').textContent='not ready'; return; }
+      const d = await r.json();
+      // TODO(real UI): resolve [#NNNN] to clickable receipts via /api/jobs/<id>/media + transcript.
+      document.getElementById('out').textContent = d.read;
+    })();
+  </script>
+</body>

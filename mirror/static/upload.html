@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Placeholder UI — architecture only. Real design later. -->
+<meta charset="utf-8"><title>Inward Mirror</title>
+<body style="font-family:system-ui;max-width:640px;margin:60px auto;padding:0 16px">
+  <h2>Inward Mirror</h2>
+  <p style="color:#666">Upload a WhatsApp export (.zip). Media is decoded <b>locally</b>;
+     only the assembled text transcript is sent to your frontier model — and you review it first.</p>
+  <form id="f">
+    <p><input name="me" placeholder="Your name exactly as it appears in the chat" required style="width:100%;padding:8px"></p>
+    <p><input type="file" name="file" accept=".zip" required></p>
+    <button>Upload &amp; decode locally</button>
+  </form>
+  <pre id="log" style="background:#f4f4f1;padding:12px;margin-top:20px;white-space:pre-wrap"></pre>
+  <script>
+    const log = m => document.getElementById('log').textContent += m + "\n";
+    document.getElementById('f').onsubmit = async e => {
+      e.preventDefault();
+      const r = await (await fetch('/api/upload',{method:'POST',body:new FormData(e.target)})).json();
+      const id = r.job_id;
+      log("job " + id + " — decoding locally…");
+      if (!r.frontier_ready) log("⚠ no frontier model configured — set FRONTIER_* in .env to enable the read.");
+      const poll = setInterval(async () => {
+        const s = await (await fetch('/api/jobs/'+id)).json();
+        log("["+s.state+"] " + (s.message||''));
+        if (s.state==='ready_to_send') {
+          clearInterval(poll);
+          log("review: /api/jobs/"+id+"/transcript");
+          await fetch('/api/jobs/'+id+'/send',{method:'POST'});
+          log("sending to frontier model…");
+          const p2 = setInterval(async () => {
+            const s2 = await (await fetch('/api/jobs/'+id)).json();
+            log("["+s2.state+"] " + (s2.message||''));
+            if (s2.state==='done'){ clearInterval(p2); location.href='/result/'+id; }
+            if (['error','needs_config'].includes(s2.state)) clearInterval(p2);
+          }, 1500);
+        }
+        if (s.state==='error') clearInterval(poll);
+      }, 1500);
+    };
+  </script>
+</body>

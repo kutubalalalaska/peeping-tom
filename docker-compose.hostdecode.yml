@@ -1,0 +1,33 @@
+# Mac-friendly REAL decode for local dev/testing. The app runs in Docker but uses
+# your NATIVE Ollama (Metal GPU — fast) instead of a containerized one (which on
+# Apple Silicon is CPU-only and slow). The read stays mock until a frontier
+# endpoint is wired.
+#
+# This is a DEV-ONLY file. It is NOT the shipped server config — the VPS runs the
+# plain `docker-compose.yml` (containerized Ollama + named volume + auto-pull).
+# Compose only loads this when you pass it explicitly with -f, so it can never
+# affect a `docker compose up` on the server.
+#
+#   brew services start ollama && ollama pull qwen2.5vl:7b   # one-time, on the host
+#   docker compose -f docker-compose.hostdecode.yml up -d
+#   open http://localhost:8000
+#
+services:
+  app:
+    build: .
+    environment:
+      VISION_BACKEND: ollama
+      OLLAMA_HOST: http://host.docker.internal:11434   # reach the host's native Ollama
+      VISION_MODEL: qwen2.5vl:7b
+      WHISPER_MODEL: base
+      FRONTIER_PROVIDER: mock                           # real read needs a frontier endpoint
+      DATA_DIR: /data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - mirror-data:/data
+    ports:
+      - "8000:8000"
+
+volumes:
+  mirror-data:

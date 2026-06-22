@@ -1,0 +1,29 @@
+# --- secrets: NEVER publish ---
+.env
+.env.local
+.env.*.local
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- frontend build ---
+node_modules/
+dist/
+
+# --- runtime / job store ---
+/data/
+jobs/
+
+# --- macOS ---
+.DS_Store
+
+# --- internal docs: held until a polished public release ---
+#     (NOTE: mirror/soul.md is the read's system prompt = app code — kept on purpose)
+#     (a short stub README.md IS published; the detailed draft lives in README.dev.md)
+/README.dev.md
+/READ_ROUTES.md
+/BACK_HALF_PLAN.md
