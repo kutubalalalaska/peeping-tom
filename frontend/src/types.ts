@@ -53,7 +53,8 @@ export interface JobStatus {
   participants?: Participant[];
   progress?: Progress;
   recent?: RecentItem[];
-  partial_read?: string;   // the read, streaming in token-by-token (during `analyzing`)
+  partial_read?: string;       // the analysis, streaming in token-by-token (during `analyzing`)
+  partial_thinking?: string;   // the model's live "thinking" view — process, not prose (during `analyzing`)
   stats?: Stats;
   frontier_ready?: boolean;
   deletion?: Deletion | null;
@@ -61,15 +62,18 @@ export interface JobStatus {
   ts?: number;
 }
 
-// A read backend the user can be routed to (see READ_ROUTES.md). The four
-// booleans are the honest facts the UI surfaces — copy is narrative-thread work.
+// A model the user can hand themselves to (the "switcher" / gallery of minds).
+// Reuses the route mechanism: each is sent to /send as `route`. The booleans are
+// the honest facts the UI surfaces — copy is narrative-thread work.
 export interface ReadRoute {
   id: string;
   kind: "managed_api" | "self_host" | "mock";
   model: string;
   label: string;
+  lab?: string;            // who made it — "Z-AI" | "DeepSeek" | "Anthropic" | "OpenAI" | "Google" …
+  open_weight?: boolean;   // open-weight model vs proprietary (the switcher's headline distinction)
   third_party: boolean;
-  zero_retention: boolean;
+  zero_retention: boolean;  // served under no-retention (ZDR) vs the provider may keep the transcript
   expect_cold_start: boolean;
   ready: boolean;
 }
