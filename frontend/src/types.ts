@@ -86,6 +86,10 @@ export interface ReadResult {
   citations: number[];
   route?: string;
   model?: string;
+  // two-pass read provenance (backend's agentic deepen step)
+  first_read?: string;
+  inspected?: string[];
+  deep_count?: number;
 }
 
 // A cited message, resolved for a clickable [#id] receipt.

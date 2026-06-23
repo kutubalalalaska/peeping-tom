@@ -1,49 +1,49 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getConfig } from "../api";
+import Frame from "./Frame";
+import DataFlowModal from "./DataFlowModal";
 
-// The front door. Framing + the one rule. The copy here is a placeholder — the
-// final words come from the narrative thread (narrative-bank.md).
+// Entry. Spare by design — the manifesto is held until launch. Copy here is
+// placeholder for the narrative thread to refine.
 export default function Landing() {
-  const [hosted, setHosted] = useState(false);
+  const [modal, setModal] = useState(false);
+  const [panel, setPanel] = useState(false);
   const nav = useNavigate();
-
-  useEffect(() => {
-    getConfig()
-      .then((c) => setHosted(c.hosted))
-      .catch(() => undefined);
-  }, []);
-
   return (
-    <main className="wrap">
-      <h1>Inward Mirror</h1>
-      <p className="lede">
-        Upload a chat history and a frontier model reads it back to you — the
-        patterns you can't see from the inside, every claim cited to the actual
-        messages.
-      </p>
-
-      <div className="card rules">
-        <b>One rule, and it lives in the code</b>
-        <ul>
-          <li>
-            Your media is decoded <b>on this machine</b>.
-          </li>
-          <li>
-            Only the assembled <b>text</b> ever crosses to the model.
-          </li>
-          <li>You see exactly what crosses — and decide — before it does.</li>
-        </ul>
-      </div>
-
-      {hosted && (
-        <p className="muted small">
-          This is the hosted exhibit: your upload is decoded on our server and
-          deleted right after. For full privacy, you can self-host.
-        </p>
-      )}
-
-      <button onClick={() => nav("/start")}>Begin</button>
-    </main>
+    <>
+      <Frame step="immovable object" hero="a mirror, pointed inward">
+        <div className="ln">
+          <div className="hint2">
+            upload a chat. it's decoded on this machine — only the text is read by a
+            frontier model, which reads your patterns back to you, cited to the
+            actual messages.
+          </div>
+        </div>
+        <div className="ln" style={{ animationDelay: "80ms" }}>
+          <div className="row" style={{ marginTop: "10px" }}>
+            <button className="opt solid" onClick={() => nav("/start")}>
+              [ begin → ]
+            </button>
+          </div>
+        </div>
+        <div className="ln" style={{ animationDelay: "160ms" }}>
+          <div className="links">
+            <button className="link" onClick={() => setPanel(!panel)}>
+              how to run it yourself
+            </button>
+            <button className="link" onClick={() => setModal(true)}>
+              how your data is processed →
+            </button>
+          </div>
+          {panel && (
+            <p className="panel">
+              open-source · <span className="pre">docker compose up</span> on your
+              own machine. the raw media never leaves your control.
+            </p>
+          )}
+        </div>
+      </Frame>
+      <DataFlowModal open={modal} onClose={() => setModal(false)} />
+    </>
   );
 }

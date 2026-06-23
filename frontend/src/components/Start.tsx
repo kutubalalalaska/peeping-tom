@@ -1,32 +1,34 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadChat } from "../api";
+import Frame from "./Frame";
 
-type Platform = "iphone" | "android";
+type Platform = "whatsapp" | "telegram";
+type OS = "iphone" | "android";
 
-// Real export steps — accuracy at step one is exactly where this project refuses
-// to fake it. The export happens on the phone, then the .zip comes to this machine.
-const STEPS: Record<Platform, string[]> = {
+const STEPS: Record<OS, string[]> = {
   iphone: [
-    "Open the chat in WhatsApp.",
-    "Tap the contact or group name at the top.",
-    "Scroll down and tap “Export Chat”.",
-    "Choose “Attach Media”.",
-    "Save the .zip to Files, or AirDrop it to this computer.",
+    "open the chat in whatsapp.",
+    "tap the contact / group name at the top.",
+    "scroll down → “export chat”.",
+    "choose “attach media”.",
+    "save the .zip to files, or airdrop it here.",
   ],
   android: [
-    "Open the chat in WhatsApp.",
-    "Tap ⋮ (top-right) → More → “Export chat”.",
-    "Choose “Include media”.",
-    "Send the .zip to yourself (email / Drive) and download it here.",
+    "open the chat in whatsapp.",
+    "tap ⋮ (top-right) → more → “export chat”.",
+    "choose “include media”.",
+    "send the .zip to yourself, download it here.",
   ],
 };
 
 export default function Start() {
-  const [platform, setPlatform] = useState<Platform>("iphone");
+  const [platform, setPlatform] = useState<Platform | null>(null);
+  const [os, setOs] = useState<OS>("iphone");
   const [file, setFile] = useState<File | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const nav = useNavigate();
 
   async function submit(e: FormEvent) {
@@ -43,54 +45,77 @@ export default function Start() {
     }
   }
 
+  if (!platform) {
+    return (
+      <Frame step="step 1/5 · platform" hero="select the platform">
+        <div className="ln">
+          <div className="row">
+            <button className="opt" onClick={() => setPlatform("whatsapp")}>
+              [ whatsapp ]
+            </button>
+            <button className="opt" disabled>
+              [ telegram · soon ]
+            </button>
+          </div>
+        </div>
+      </Frame>
+    );
+  }
+
   return (
-    <main className="wrap">
-      <h1>Bring your chat</h1>
-
-      <section className="sources">
-        <div className="source on">WhatsApp</div>
-        <div className="source off">
-          Telegram <span>soon</span>
+    <Frame
+      step="step 2/5 · export"
+      hero="export from whatsapp"
+      nav={<button onClick={() => setPlatform(null)}>[ ← back ]</button>}
+    >
+      <form onSubmit={submit}>
+        <div className="ln">
+          <div className="row">
+            <button
+              type="button"
+              className={"opt" + (os === "iphone" ? " sel" : "")}
+              onClick={() => setOs("iphone")}
+            >
+              [ iphone ]
+            </button>
+            <button
+              type="button"
+              className={"opt" + (os === "android" ? " sel" : "")}
+              onClick={() => setOs("android")}
+            >
+              [ android ]
+            </button>
+          </div>
         </div>
-      </section>
-
-      <div className="card">
-        <div className="seg">
-          <button
-            type="button"
-            className={platform === "iphone" ? "on" : ""}
-            onClick={() => setPlatform("iphone")}
-          >
-            iPhone
-          </button>
-          <button
-            type="button"
-            className={platform === "android" ? "on" : ""}
-            onClick={() => setPlatform("android")}
-          >
-            Android
-          </button>
+        <div className="ln" style={{ animationDelay: "80ms" }}>
+          <div className="steps">
+            {STEPS[os].map((st, i) => (
+              <div key={i}>
+                {i + 1} · {st}
+              </div>
+            ))}
+            <div>…then drop the .zip below.</div>
+          </div>
         </div>
-        <ol className="steps">
-          {STEPS[platform].map((s, i) => (
-            <li key={i}>{s}</li>
-          ))}
-        </ol>
-        <p className="muted small">…then send the .zip over here.</p>
-      </div>
-
-      <form onSubmit={submit} className="card">
-        <input
-          type="file"
-          accept=".zip"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          required
-        />
-        <button type="submit" disabled={busy || !file}>
-          {busy ? "Uploading…" : "Upload & decode locally"}
-        </button>
+        <div className="ln" style={{ animationDelay: "160ms" }}>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".zip"
+            style={{ display: "none" }}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
+          <div className="row">
+            <button type="button" className="opt" onClick={() => inputRef.current?.click()}>
+              [ {file ? file.name.slice(0, 28) : "choose .zip"} ]
+            </button>
+            <button type="submit" className="opt solid" disabled={!file || busy}>
+              [ {busy ? "uploading…" : "upload .zip →"} ]
+            </button>
+          </div>
+        </div>
+        {err && <p className="err">{err}</p>}
       </form>
-      {err && <p className="err">{err}</p>}
-    </main>
+    </Frame>
   );
 }
