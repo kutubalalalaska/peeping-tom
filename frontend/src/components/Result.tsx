@@ -5,33 +5,46 @@ import type { ReadResult, Retained, ReceiptMessage } from "../types";
 import Frame from "./Frame";
 import { seedOf, thumb, wave } from "../lib/ascii";
 
+// Stable left/right side per actor: distinct senders are ordered by first
+// appearance and alternated, so each person sits consistently on one side across
+// the whole read (a two-sided chat shape). Which side is "you" is a v2 concern —
+// for now it's just the two actors, split.
+function sidesOf(msgs: Record<number, ReceiptMessage>): Record<string, "me" | "them"> {
+  const first: Record<string, number> = {};
+  Object.values(msgs).forEach((m) => {
+    if (first[m.sender] === undefined || m.id < first[m.sender]) first[m.sender] = m.id;
+  });
+  const map: Record<string, "me" | "them"> = {};
+  Object.keys(first)
+    .sort((a, b) => first[a] - first[b])
+    .forEach((name, i) => (map[name] = i % 2 === 0 ? "them" : "me"));
+  return map;
+}
+
 // The cited message(s), rendered inline as real chat bubbles — the one piece of
-// styling the read carries. "you" sits on the right (ink), everyone else on the
-// left (light), so a quoted exchange reads the way it did in the app.
-function ChatBubbles({ msgs, me }: { msgs: ReceiptMessage[]; me: string }) {
+// styling the read carries. Actors split left/right (see sidesOf), so a quoted
+// exchange reads the way it did in the app.
+function ChatBubbles({ msgs, sides }: { msgs: ReceiptMessage[]; sides: Record<string, "me" | "them"> }) {
   return (
     <div className="bubbles">
-      {msgs.map((m) => {
-        const mine = m.sender === me;
-        return (
-          <div className={"bubble " + (mine ? "me" : "them")} key={m.id}>
-            <div className="b-meta">
-              {m.sender} · {m.ts}
-            </div>
-            {m.text && <div className="b-text">{m.text}</div>}
-            {m.media.map((md) => (
-              <figure className="b-media" key={md.file}>
-                <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 20, 6)}</pre>
-                {md.caption && (
-                  <figcaption>
-                    “{md.caption}” <span className="b-blind">— blind caption</span>
-                  </figcaption>
-                )}
-              </figure>
-            ))}
+      {msgs.map((m) => (
+        <div className={"bubble " + (sides[m.sender] ?? "them")} key={m.id}>
+          <div className="b-meta">
+            {m.sender} · {m.ts}
           </div>
-        );
-      })}
+          {m.text && <div className="b-text">{m.text}</div>}
+          {m.media.map((md) => (
+            <figure className="b-media" key={md.file}>
+              <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 20, 6)}</pre>
+              {md.caption && (
+                <figcaption>
+                  “{md.caption}” <span className="b-blind">— blind caption</span>
+                </figcaption>
+              )}
+            </figure>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -41,8 +54,9 @@ const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
 // The read: flowing prose, with each [#id] citation (or a run of them) expanded
 // in place into a chat-bubble cluster of the messages it points to. `##` lines,
 // if the model emits any, degrade to a light subheading.
-function renderRead(text: string, msgs: Record<number, ReceiptMessage>, me: string): ReactNode[] {
+function renderRead(text: string, msgs: Record<number, ReceiptMessage>): ReactNode[] {
   const out: ReactNode[] = [];
+  const sides = sidesOf(msgs);
   let firstProse = true;
   text.split(/\n\n+/).forEach((block, bi) => {
     const b = block.trim();
@@ -56,7 +70,7 @@ function renderRead(text: string, msgs: Record<number, ReceiptMessage>, me: stri
       if (/\[#\d+\]/.test(tok)) {
         const ids = [...new Set([...tok.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))];
         const cited = ids.map((id) => msgs[id]).filter(Boolean) as ReceiptMessage[];
-        if (cited.length) out.push(<ChatBubbles key={"b" + bi + "_" + ti} msgs={cited} me={me} />);
+        if (cited.length) out.push(<ChatBubbles key={"b" + bi + "_" + ti} msgs={cited} sides={sides} />);
       } else {
         const p = tok.trim();
         if (p && !PUNCT_ONLY.test(p)) {
@@ -126,7 +140,7 @@ export default function Result() {
 
   if (!res) {
     return (
-      <Frame step="step 5/5 · the read" hero="loading the read">
+      <Frame step="step 4/4 · the read" hero="loading the read">
         <div className="up">…</div>
       </Frame>
     );
@@ -134,13 +148,13 @@ export default function Result() {
 
   return (
     <Frame
-      step="step 5/5 · the read"
+      step="step 4/4 · the read"
       hero="the read"
       top
       custody={nuked ? "✓ nothing remains" : "✓ raw media stays local · the read is yours to keep or destroy"}
     >
       <div className="read">
-        {renderRead(res.read, msgs, res.me)}
+        {renderRead(res.read, msgs)}
 
         {res.deep_count ? (
           <p className="prov">
