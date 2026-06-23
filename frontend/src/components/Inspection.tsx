@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getStatus, getConfig, setRole, sendRead } from "../api";
+import { getStatus } from "../api";
 import type { JobStatus, RecentItem } from "../types";
 import Frame from "./Frame";
 import { SPIN, seedOf, thumb, wave, player, progBar, scanBar } from "../lib/ascii";
@@ -142,21 +142,14 @@ function ThinkingTicker({ text, sf }: { text: string; sf: number }) {
   );
 }
 
-// Decode/parse → select yourself → (send) → the read. One screen spans
-// uploaded → inspecting → ready → analyzing, then navigates to /result on done.
+// Upload drives everything: parse/decode → the read, automatically (no identity
+// pick, no send gate — v1; who's-who is deferred to v2). One screen spans
+// uploaded → inspecting → analyzing, then navigates to /result on done.
 export default function Inspection() {
   const { id } = useParams<{ id: string }>();
   const [s, setS] = useState<JobStatus | null>(null);
-  const [sending, setSending] = useState(false);
-  const [routeId, setRouteId] = useState<string | undefined>(undefined);
   const nav = useNavigate();
   const sf = useSpinFrame(true);
-
-  useEffect(() => {
-    getConfig()
-      .then((c) => setRouteId(c.default_route ?? c.routes?.find((r) => r.ready)?.id))
-      .catch(() => undefined);
-  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -176,13 +169,6 @@ export default function Inspection() {
     }, 1000);
     return () => clearInterval(t);
   }, [id, nav]);
-
-  async function pick(name: string) {
-    if (!id) return;
-    setSending(true);
-    await setRole(id, name).catch(() => undefined);
-    await sendRead(id, routeId).catch(() => undefined);
-  }
 
   const state = s?.state;
   const pct = s?.progress?.pct ?? 0;
@@ -207,10 +193,10 @@ export default function Inspection() {
     );
   }
 
-  // sending (optimistic) or analyzing → the read is being generated. Three beats,
-  // told apart by status.message: reading the chat, opening the photos it flagged
-  // (the relocated media spectacle), then re-reading with them in view.
-  if (sending || state === "analyzing") {
+  // analyzing → the read is being generated. Three beats, told apart by
+  // status.message: reading the chat, opening the photos it flagged (the relocated
+  // media spectacle), then re-reading with them in view.
+  if (state === "analyzing") {
     const msg = s?.message ?? "the model is reading the transcript…";
     const thinking = s?.partial_thinking?.trim();
     const partial = s?.partial_read?.trim();
@@ -226,7 +212,7 @@ export default function Inspection() {
     const showThinking = !showCarousel && !showRead && !!thinking;
     return (
       <Frame
-        step="step 5/5 · the read"
+        step="step 4/4 · the read"
         hero={showCarousel ? "opening the photos it flagged" : "reading your chat"}
         top={showRead}
         custody="✓ raw media stays local · only the transcript crossed"
@@ -256,34 +242,6 @@ export default function Inspection() {
     );
   }
 
-  // ready → select yourself (picking yourself sends the transcript)
-  if (state === "ready") {
-    const participants = s?.participants ?? [];
-    return (
-      <Frame
-        step="step 4/5 · you"
-        hero="select yourself"
-        custody="nothing has left this machine yet"
-      >
-        <div className="ln">
-          <div className="hint2">
-            one question — it anchors the whole read to you. picking yourself sends
-            only the transcript to the model.
-          </div>
-        </div>
-        <div className="ln" style={{ animationDelay: "80ms" }}>
-          <div className="row">
-            {participants.map((p) => (
-              <button key={p.name} className="opt" disabled={sending} onClick={() => pick(p.name)}>
-                [ {p.name} · {p.count} ]
-              </button>
-            ))}
-          </div>
-        </div>
-      </Frame>
-    );
-  }
-
   // uploaded / inspecting → the local pass. With iterative discovery this is just
   // text + voice-note transcription (a quick "parsing" beat); images are opened
   // later, during the read. Legacy mode decodes all media here. Drive the framing
@@ -292,7 +250,7 @@ export default function Inspection() {
   const uploading = state === "uploaded" || !state;
   const hasVisual = recent.some((it) => it.type !== "audio");
   const hero = uploading ? "uploading your chat" : hasVisual ? "decoding your media" : "parsing your chat";
-  const step = uploading ? "step 3/5 · upload" : `step 3/5 · ${hasVisual ? "decode" : "parse"}`;
+  const step = uploading ? "step 3/4 · upload" : `step 3/4 · ${hasVisual ? "decode" : "parse"}`;
   return (
     <Frame step={step} hero={hero} custody="processed on this machine — nothing has left it">
       {uploading ? (
