@@ -164,6 +164,13 @@ button { font: inherit; cursor: pointer; }
 /* the real cited photo, framed to sit in the mono/black-on-white system */
 .bubble .b-media .b-photo { display: block; width: 100%; max-width: 240px; height: auto; margin: 0; border: 1px solid var(--ink); }
 .bubble.me .b-media .b-photo { border-color: rgba(255,255,255,.45); }
+/* playable voice note — a mono transport, not a chunky native control */
+.bubble .b-audio .audio-btn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 2px 0; color: inherit; font: inherit; font-size: 12px; letter-spacing: .04em; }
+.bubble .b-audio .audio-btn:hover { opacity: .65; }
+.bubble .b-audio .ap-ico { font-size: 11px; }
+.bubble .b-audio .ap-bar { letter-spacing: 1px; }
+.bubble .b-audio .ap-time { color: var(--muted); font-size: 10.5px; }
+.bubble.me .b-audio .ap-time { color: rgba(255,255,255,.55); }
 .bubble .b-media figcaption { font-size: 12px; color: var(--secondary); line-height: 1.45; margin-top: 4px; }
 .bubble.me .b-media figcaption { color: rgba(255,255,255,.82); }
 .bubble .b-blind { color: var(--muted); font-style: italic; font-size: 10.5px; }

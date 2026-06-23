@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getResult, getRetained, getMessages, deleteJob, transcriptUrl, mediaUrl } from "../api";
 import type { ReadResult, Retained, ReceiptMessage, ReceiptMedia } from "../types";
@@ -21,25 +21,86 @@ function sidesOf(msgs: Record<number, ReceiptMessage>): Record<string, "me" | "t
   return map;
 }
 
-// A cited attachment: the REAL photo, served locally from the export (the evidence
-// thesis made tangible — the actual image beside its blind caption). Falls back to
-// the ASCII thumb if it can't render (a non-browser format, or the raw media was
-// already deleted on the ephemeral path). Audio/video keep their ASCII glyph.
-function BubbleMedia({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
+const fmt = (s: number) => {
+  if (!isFinite(s) || s < 0) s = 0;
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+};
+
+// The REAL cited photo, served locally from the export — the evidence thesis made
+// tangible (the actual image beside the caption the model wrote blind). Falls back
+// to the ASCII thumb if it can't render: a non-browser format (e.g. HEIC) or the
+// raw media already deleted on the ephemeral path.
+function Photo({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
   const [failed, setFailed] = useState(false);
+  if (!jobId || failed) return <pre>{thumb(seedOf(md.file), 20, 6)}</pre>;
+  return (
+    <img
+      className="b-photo"
+      src={mediaUrl(jobId, md.file)}
+      alt={md.caption || md.file}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+// A cited voice note, actually playable — a mono play/pause transport over the
+// real audio (served locally), with a live ▮▯ progress bar. Falls back to the
+// static ASCII waveform if the format can't play here or the media is gone.
+function AudioBit({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
+  const ref = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [t, setT] = useState(0);
+  const [dur, setDur] = useState(0);
+  if (!jobId) return <pre>{wave(seedOf(md.file), 16)}</pre>;
+  const filled = dur > 0 ? Math.round(Math.min(1, t / dur) * 12) : 0;
+  const bar = "▮".repeat(filled) + "▯".repeat(12 - filled);
+  const toggle = () => {
+    const a = ref.current;
+    if (!a) return;
+    if (a.paused) a.play().catch(() => setFailed(true));
+    else a.pause();
+  };
+  return (
+    <div className="b-audio">
+      {failed ? (
+        <pre>{wave(seedOf(md.file), 16)}</pre>
+      ) : (
+        <button className="audio-btn" onClick={toggle} aria-label={playing ? "pause" : "play"}>
+          <span className="ap-ico">{playing ? "⏸" : "▶"}</span>
+          <span className="ap-bar">{bar}</span>
+          <span className="ap-time">{fmt(t)} / {fmt(dur)}</span>
+        </button>
+      )}
+      <audio
+        ref={ref}
+        src={mediaUrl(jobId, md.file)}
+        preload="metadata"
+        onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+        onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
+// A cited attachment, rendered as real evidence: the photo (Photo) or a playable
+// voice note (AudioBit); other types keep their ASCII glyph. The blind caption
+// rides underneath either way.
+function BubbleMedia({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
   const isPhoto = md.type === "image" || md.type === "sticker";
   return (
     <figure className="b-media">
-      {isPhoto && jobId && !failed ? (
-        <img
-          className="b-photo"
-          src={mediaUrl(jobId, md.file)}
-          alt={md.caption || md.file}
-          loading="lazy"
-          onError={() => setFailed(true)}
-        />
+      {isPhoto ? (
+        <Photo jobId={jobId} md={md} />
+      ) : md.type === "audio" ? (
+        <AudioBit jobId={jobId} md={md} />
       ) : (
-        <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 20, 6)}</pre>
+        <pre>{thumb(seedOf(md.file), 20, 6)}</pre>
       )}
       {md.caption && (
         <figcaption>
