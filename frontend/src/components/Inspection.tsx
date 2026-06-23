@@ -1,13 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getStatus, getConfig, setRole, sendRead } from "../api";
 import type { JobStatus, RecentItem } from "../types";
 import Frame from "./Frame";
-import { SPIN, seedOf, thumb, wave, player, progBar } from "../lib/ascii";
+import { SPIN, seedOf, thumb, wave, player, progBar, scanBar } from "../lib/ascii";
 import { useSpinFrame } from "../lib/hooks";
 
 const tag = (t: string) =>
   t === "sticker" ? "stk" : t === "video" ? "vid" : t === "audio" ? "aud" : "img";
+
+// Calm, on-narrative lines that rotate during the (minutes-long) read so the
+// screen never feels dead. They restate the privacy invariant, never overstate it.
+const TIPS = [
+  "the model reads what's implicit — not just what you said.",
+  "only the text transcript crossed. your photos never left this machine.",
+  "patterns surface across time, not in any single message.",
+  "every claim comes back with the exact messages behind it.",
+  "a long history can take a few minutes to read.",
+];
+const tipOf = (sf: number) => TIPS[Math.floor(sf / 70) % TIPS.length]; // ~5s each
 
 // One decoded item rendered as ASCII (the design replaces real imagery with text).
 function Glimpse({ item, sf }: { item: RecentItem; sf: number }) {
@@ -32,7 +43,74 @@ function Glimpse({ item, sf }: { item: RecentItem; sf: number }) {
   );
 }
 
-// Decode-as-inspection → select yourself → (send) → the read. One screen spans
+// The live media feed: the latest decoded item large, a fading tail beneath it.
+// Reused for the up-front pass (inspecting) AND the read's deep-look pass
+// (analyzing) — the relocated "watch the mirror open the photos" spectacle.
+function Carousel({ recent, sf, label }: { recent: RecentItem[]; sf: number; label: string }) {
+  const latest = recent[recent.length - 1];
+  return (
+    <div className="pcontent">
+      <div className="stage">
+        {latest ? <Glimpse item={latest} sf={sf} /> : <div className="up">parsing…</div>}
+      </div>
+      <div className="tail">
+        <div className="lab">{label}</div>
+        <div className="rows">
+          {recent.slice(-4).map((it, i, arr) => (
+            <div
+              className="lrow"
+              key={it.file}
+              style={{ opacity: 0.25 + 0.75 * ((i + 1) / arr.length) }}
+            >
+              [{tag(it.type)}] {it.file}
+              {it.caption ? ` “${it.caption.slice(0, 46)}”` : ""} ✓
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Strip the tool-only INSPECT line and the [#id] citations (resolved into quote
+// blocks later, in Result) so the streaming read reads as clean prose.
+const tidy = (t: string) =>
+  t.replace(/INSPECT\s*=\s*\[[^\]]*\]?/i, "").replace(/(?:\s*\[#\d+\])+/g, "");
+
+// The read as it streams in (status.partial_read): the same chapter/teaser shape
+// Result uses, with a caret at the end. Citations resolve on the result page.
+function LiveRead({ text }: { text: string }) {
+  const sections: { title: string | null; body: string }[] = [{ title: null, body: "" }];
+  tidy(text)
+    .split("\n")
+    .forEach((line) => {
+      const h = line.match(/^\s*##\s+(.*\S)\s*$/);
+      if (h) sections.push({ title: h[1].trim(), body: "" });
+      else sections[sections.length - 1].body += line + "\n";
+    });
+  const out: ReactNode[] = [];
+  sections.forEach((sec, si) => {
+    if (sec.title) out.push(<h2 className="chapter" key={"h" + si}>{sec.title}</h2>);
+    sec.body.split(/\n\n+/).forEach((para, pi) => {
+      const p = para.trim();
+      if (p) {
+        out.push(
+          <p key={"p" + si + "_" + pi} className={si === 0 && !sec.title ? "teaser" : ""}>
+            {p}
+          </p>
+        );
+      }
+    });
+  });
+  return (
+    <div className="read">
+      {out}
+      <span className="cur" />
+    </div>
+  );
+}
+
+// Decode/parse → select yourself → (send) → the read. One screen spans
 // uploaded → inspecting → ready → analyzing, then navigates to /result on done.
 export default function Inspection() {
   const { id } = useParams<{ id: string }>();
@@ -79,7 +157,6 @@ export default function Inspection() {
   const done = s?.progress?.done ?? 0;
   const total = s?.progress?.total ?? 0;
   const recent = s?.recent ?? [];
-  const latest = recent[recent.length - 1];
   const spin = SPIN[sf % SPIN.length];
 
   if (state === "error") {
@@ -98,24 +175,42 @@ export default function Inspection() {
     );
   }
 
-  // sending (optimistic) or analyzing → the read is being generated
+  // sending (optimistic) or analyzing → the read is being generated. Three beats,
+  // told apart by status.message: reading the chat, opening the photos it flagged
+  // (the relocated media spectacle), then re-reading with them in view.
   if (sending || state === "analyzing") {
+    const msg = s?.message ?? "the model is reading the transcript…";
+    const partial = s?.partial_read?.trim();
+    // The deep-look sub-phase. The backend leaves partial_read holding the prior
+    // read while it opens images, so the carousel (the relocated media spectacle)
+    // must win over the stale partial here.
+    const opening = /opening/i.test(msg);
+    const imgs = recent.filter((it) => it.type !== "audio");
+    const showCarousel = opening && imgs.length > 0;
+    const showRead = !showCarousel && !!partial;
     return (
       <Frame
         step="step 5/5 · the read"
-        hero="reading your chat"
+        hero={showCarousel ? "opening the photos it flagged" : "reading your chat"}
+        top={showRead}
         custody="✓ raw media stays local · only the transcript crossed"
       >
-        <div className="pcontent">
-          <div className="up">
-            {s?.message ?? "the model is reading the transcript…"}
-            <br />
-            only the text crossed — nothing else left this machine
+        {showCarousel ? (
+          <Carousel recent={imgs} sf={sf} label="just opened" />
+        ) : showRead ? (
+          <LiveRead text={partial!} />
+        ) : (
+          <div className="pcontent">
+            <div className="up">
+              {msg}
+              <br />
+              <span className="tip">{tipOf(sf)}</span>
+            </div>
           </div>
-        </div>
+        )}
         <div className="barrow">
-          <span className="pre">{progBar(100)}</span>
-          <span className="phase">{spin}&nbsp;&nbsp;{s?.message ?? "the read…"}</span>
+          <span className="pre">{scanBar(sf)}</span>
+          <span className="phase">{spin}&nbsp;&nbsp;{msg}</span>
         </div>
       </Frame>
     );
@@ -149,48 +244,45 @@ export default function Inspection() {
     );
   }
 
-  // uploaded / inspecting → processing
+  // uploaded / inspecting → the local pass. With iterative discovery this is just
+  // text + voice-note transcription (a quick "parsing" beat); images are opened
+  // later, during the read. Legacy mode decodes all media here. Drive the framing
+  // off what's actually surfaced so we never label an audio pass as image decode,
+  // nor show an empty media stage.
   const uploading = state === "uploaded" || !state;
+  const hasVisual = recent.some((it) => it.type !== "audio");
+  const hero = uploading ? "uploading your chat" : hasVisual ? "decoding your media" : "parsing your chat";
+  const step = uploading ? "step 3/5 · upload" : `step 3/5 · ${hasVisual ? "decode" : "parse"}`;
   return (
-    <Frame
-      step={uploading ? "step 3/5 · upload" : "step 3/5 · decode"}
-      hero={uploading ? "uploading your chat" : "decoding your media"}
-      custody="decoded on this machine — nothing has left it"
-    >
-      <div className="pcontent">
-        {uploading ? (
+    <Frame step={step} hero={hero} custody="processed on this machine — nothing has left it">
+      {uploading ? (
+        <div className="pcontent">
           <div className="up">
             sending chat.zip to this machine…
             <br />
             the raw file stays local
           </div>
-        ) : (
-          <>
-            <div className="stage">
-              {latest ? <Glimpse item={latest} sf={sf} /> : <div className="up">parsing…</div>}
-            </div>
-            <div className="tail">
-              <div className="lab">just decoded</div>
-              <div className="rows">
-                {recent.slice(-4).map((it, i, arr) => (
-                  <div
-                    className="lrow"
-                    key={it.file}
-                    style={{ opacity: 0.25 + 0.75 * ((i + 1) / arr.length) }}
-                  >
-                    [{tag(it.type)}] {it.file}
-                    {it.caption ? ` “${it.caption.slice(0, 46)}”` : ""} ✓
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+        </div>
+      ) : recent.length ? (
+        <Carousel recent={recent} sf={sf} label="just decoded" />
+      ) : (
+        <div className="pcontent">
+          <div className="up">
+            {s?.message ?? "parsing your chat…"}
+            <br />
+            reading messages and transcribing voice notes — locally
+          </div>
+        </div>
+      )}
       <div className="barrow">
-        <span className="pre">{progBar(pct)}</span>
+        <span className="pre">{total ? progBar(pct) : scanBar(sf)}</span>
         <span className="phase">
-          {spin}&nbsp;&nbsp;{uploading ? "uploading…" : `decode media  ${done}/${total}`}
+          {spin}&nbsp;&nbsp;
+          {uploading
+            ? "uploading…"
+            : total
+            ? `${hasVisual ? "decode" : "transcribe"}  ${done}/${total}`
+            : "parsing…"}
         </span>
       </div>
     </Frame>

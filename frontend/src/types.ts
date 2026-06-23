@@ -53,6 +53,7 @@ export interface JobStatus {
   participants?: Participant[];
   progress?: Progress;
   recent?: RecentItem[];
+  partial_read?: string;   // the read, streaming in token-by-token (during `analyzing`)
   stats?: Stats;
   frontier_ready?: boolean;
   deletion?: Deletion | null;

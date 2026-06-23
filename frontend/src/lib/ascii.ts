@@ -55,3 +55,12 @@ export function progBar(pct: number, width = 28): string {
   const f = Math.round((p / 100) * width);
   return "[" + "█".repeat(f) + "░".repeat(width - f) + "] " + String(Math.round(p)).padStart(3, " ") + "%";
 }
+
+// Indeterminate "working" bar: a lit window slides across, driven by the frame
+// counter. Used where there's no numeric progress (the read, the deep pass).
+export function scanBar(sf: number, width = 28, win = 5): string {
+  const pos = sf % (width + win);
+  let s = "";
+  for (let i = 0; i < width; i++) s += i >= pos - win && i < pos ? "█" : "░";
+  return "[" + s + "]";
+}
