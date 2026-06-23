@@ -37,8 +37,10 @@ _DECODABLE = {"image", "sticker", "audio", "video"}
 
 # ---- pipeline phases (background) ----
 def _preprocess(job_id: str):
-    """Parse first (instant) so the role selector + participant list exist
-    immediately, then decode media (slow), streaming progress + glimpses."""
+    """Parse first (instant), then decode media (slow), streaming progress +
+    glimpses. v1: the upload itself drives the whole sequence — when the transcript
+    is assembled this chains straight into the read (no identity pick, no manual
+    send). `participants` is still computed for v2 (who's-who, deferred)."""
     try:
         exp = jobs.path(job_id, "export")
         chat = ingest.find_chat(exp)
@@ -80,11 +82,15 @@ def _preprocess(job_id: str):
         jobs.path(job_id, "messages.json").write_text(json.dumps(
             [{"id": m.id, "ts": m.ts, "sender": m.sender, "text": m.text, "media": m.media} for m in msgs],
             ensure_ascii=False))
-        jobs.set_status(job_id, state="ready", message="ready — pick yourself, then continue",
+        jobs.set_status(job_id, message="starting the read…",
                         progress={"done": total, "total": total, "pct": 100},
                         stats=T.stats(msgs, decoded), frontier_ready=settings.frontier_ready())
     except Exception as e:
-        jobs.set_status(job_id, state="error", message=f"preprocess failed: {e}")
+        jobs.set_status(job_id, state="error", message=f"preprocess failed: {e}"); return
+    # The upload starts everything: go straight into the read (default route). _read
+    # has its own try/except + needs_config handling, so failures don't read as
+    # "preprocess failed". A manual /send can still re-run it (e.g. another model).
+    _read(job_id)
 
 
 def _image_files_for_ids(job_id: str, ids):
@@ -108,7 +114,7 @@ def _read(job_id: str):
     up to MAX_INSPECT_ROUNDS rounds, capped at MAX_INSPECT_IMAGES total."""
     try:
         st = jobs.get_status(job_id) or {}
-        me = st.get("me", "me")
+        me = st.get("me") or ""          # identity deferred to v2; the read isn't anchored to a name
         route = settings.route(st.get("route"))
         if route is None:
             jobs.set_status(job_id, state="needs_config", message=settings.frontier_hint()); return
