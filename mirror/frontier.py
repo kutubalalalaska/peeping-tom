@@ -41,6 +41,18 @@ SELECT_INSTRUCTION = (
     "part of the analysis."
 )
 
+# Prepended (streamed reads only) so the analysis screen can show the read FORMING,
+# not just the finished prose typing out. The notes are a live progress signal —
+# stripped out of the displayed read; if the model also streams real reasoning
+# tokens, those drive the "thinking" view instead and these are hidden.
+NOTES_INSTRUCTION = (
+    "\n\nBEFORE the analysis, output 3-6 short working notes — each on its OWN line, "
+    "starting with `NOTE: ` — naming what you're examining as you form the read (a period "
+    "you're reading, a pattern you're testing, something that surprises you). Keep each to a "
+    "brief phrase, written in the moment. Then output a line containing ONLY `---`, then the "
+    "analysis. The notes are a live progress signal for the reader, NOT part of the analysis."
+)
+
 
 class NotConfigured(RuntimeError):
     pass
@@ -79,6 +91,50 @@ def _strip_inspect_partial(text: str) -> str:
     return re.split(r"INSPECT\s*=", text, maxsplit=1, flags=re.I)[0].rstrip()
 
 
+_NOTE_RE = re.compile(r"(?im)^\s*NOTE:\s?(.*\S)?\s*$")   # a `NOTE: …` working line
+_DELIM_RE = re.compile(r"(?m)^\s*-{3,}\s*$")             # the `---` notes/analysis divider
+
+
+def _notes_from(pre: str) -> str:
+    """Pull the working-note text out of a NOTE preamble (drops the `NOTE:` prefix)."""
+    found = [n for n in _NOTE_RE.findall(pre) if n]
+    return ("\n".join(found).strip() or pre.strip())
+
+
+def _split_notes_stream(content: str):
+    """(notes, body) from possibly-partial streamed `content`. While still inside the
+    NOTE preamble, body is "" (so we don't flash notes into the read); once the `---`
+    divider arrives the rest is the read. If the model isn't using notes at all, the
+    whole thing is the read."""
+    m = _DELIM_RE.search(content)
+    if m:
+        return _notes_from(content[:m.start()]), content[m.end():].lstrip("\n")
+    head = content.lstrip()
+    up = head.upper()
+    if up.startswith("NOTE"):
+        return _notes_from(content), ""
+    if len(head) < 5 and "NOTE".startswith(up):     # first chars of "NOTE" still arriving
+        return "", ""
+    return "", content
+
+
+def split_stream_read(raw: str):
+    """Final split of a (streamed) read into (notes, read_body, picks): the NOTE
+    preamble for the thinking view, the analysis for the result, and the INSPECT
+    image ids for the deep loop. Safe on reads with no notes (notes => "")."""
+    clean, picks = parse_inspect(raw)               # strip the trailing INSPECT line first
+    m = _DELIM_RE.search(clean)
+    if m:
+        return _notes_from(clean[:m.start()]), clean[m.end():].strip(), picks
+    lines = clean.splitlines()                      # no divider — eat any leading NOTE: lines
+    i = 0
+    while i < len(lines) and (not lines[i].strip() or lines[i].lstrip().upper().startswith("NOTE")):
+        i += 1
+    if i == 0:
+        return "", clean.strip(), picks
+    return _notes_from("\n".join(lines[:i])), "\n".join(lines[i:]).strip(), picks
+
+
 def _mock_read(transcript: str, me: str, select_k: int = 0) -> str:
     """Templated read so the full flow runs without a real endpoint. Cites real ids."""
     ids = re.findall(r"^#(\d+)", transcript, re.M)
@@ -102,15 +158,25 @@ def _mock_read(transcript: str, me: str, select_k: int = 0) -> str:
     return out
 
 
+_MOCK_NOTES = ["reading the early months",
+               "testing a recurring avoidance pattern",
+               "watching who initiates over time",
+               "the tone seems to cool after spring"]
+
+
 def _emit_mock_stream(full: str, on_delta) -> None:
-    """Replay a mock read as a token stream so the streamed-read UI can be exercised
-    on the mock stack (no real endpoint). Mock-only; the real read streams for real."""
-    clean = _strip_inspect_partial(full)
-    words = clean.split(" ")
+    """Replay a mock read as a (thinking → read) token stream so the analysis UI can
+    be exercised on the mock stack (no real endpoint). Mock-only; the real read's
+    thinking comes from genuine reasoning/NOTE tokens."""
     acc = ""
-    for w in words:
-        acc = f"{acc} {w}" if acc else w
-        on_delta(acc)
+    for n in _MOCK_NOTES:                       # the "thinking" phase
+        acc = f"{acc}\n{n}" if acc else n
+        on_delta("thinking", acc)
+        time.sleep(0.25)
+    read_acc = ""
+    for w in _strip_inspect_partial(full).split(" "):    # then the read writes
+        read_acc = f"{read_acc} {w}" if read_acc else w
+        on_delta("read", read_acc)
         time.sleep(0.03)
 
 
@@ -120,10 +186,13 @@ def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None)
     If select_k>0, the read is asked to append an INSPECT=[…] line picking up to
     select_k images for a deeper look (split it out with parse_inspect).
 
-    If `on_delta` is given, the read is STREAMED: on_delta(display_text_so_far) is
-    called as tokens arrive (INSPECT already stripped, so it's render-ready), and
-    the full RAW text is still returned at the end (so parse_inspect works on it).
-    Without on_delta the call blocks and returns the whole read (legacy path)."""
+    If `on_delta` is given, the read is STREAMED: on_delta(kind, text_so_far) is
+    called as tokens arrive — kind "read" is the render-ready analysis (INSPECT and
+    the NOTE preamble stripped), kind "thinking" is the live process view (real
+    reasoning tokens if the model streams them, else the prompted NOTE working-lines).
+    The full RAW text is still returned (so split_stream_read / parse_inspect work).
+    Without on_delta the call blocks and returns the whole read (legacy path —
+    no NOTE preamble, no reasoning capture)."""
     route = route or settings.route()
     if route is None or not route.ready():
         raise NotConfigured(settings.frontier_hint())
@@ -135,6 +204,11 @@ def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None)
     user = USER.format(me=me, transcript=transcript)
     if select_k:
         user += SELECT_INSTRUCTION.format(k=select_k)
+    if on_delta is not None and not settings.stream_reasoning:
+        # Fallback "thinking" source: ask for the working-notes preamble only when we
+        # are NOT relying on real reasoning tokens (keeps the read prompt clean once
+        # reasoning is confirmed on the live endpoint via scripts/probe_reasoning.py).
+        user += NOTES_INSTRUCTION
     base = route.base_url.rstrip("/")
 
     if route.provider == "anthropic":
@@ -145,14 +219,18 @@ def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None)
             data = _post(f"{base}/v1/messages", payload, headers)
             return "".join(b.get("text", "") for b in data.get("content", []))
         payload["stream"] = True
-        chunks = []
+        chunks, think, saw = [], [], {"reasoning": False}
 
         def anthropic_event(e):
-            if e.get("type") == "content_block_delta":
-                d = e.get("delta") or {}
-                if d.get("type") == "text_delta" and d.get("text"):
-                    chunks.append(d["text"])
-                    on_delta(_strip_inspect_partial("".join(chunks)))
+            if e.get("type") != "content_block_delta":
+                return
+            d = e.get("delta") or {}
+            if d.get("type") == "thinking_delta" and d.get("thinking"):   # extended thinking
+                think.append(d["thinking"]); saw["reasoning"] = True
+                on_delta("thinking", "".join(think))
+            elif d.get("type") == "text_delta" and d.get("text"):
+                chunks.append(d["text"])
+                _emit_text("".join(chunks), saw["reasoning"], on_delta)
 
         _post_stream(f"{base}/v1/messages", payload, headers, anthropic_event)
         return "".join(chunks)
@@ -173,19 +251,39 @@ def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None)
         data = _post(f"{base}/chat/completions", payload, headers)
         return data["choices"][0]["message"]["content"]
     payload["stream"] = True
-    chunks = []
+    if settings.stream_reasoning:
+        # Ask the provider to include reasoning tokens in the stream (OpenRouter).
+        # Default off until probed on the live endpoint (scripts/probe_reasoning.py);
+        # the NOTE preamble is the fallback "thinking" source when this is absent.
+        payload["reasoning"] = {"enabled": True}
+    chunks, think, saw = [], [], {"reasoning": False}
 
     def openai_event(e):
-        # Reasoning models (e.g. GLM-5.2) may emit a separate `reasoning` field; we
-        # accumulate only `content`, so the read body never includes the scratchpad.
+        # A reasoning model (e.g. GLM-5.2) streams its chain-of-thought as a separate
+        # `reasoning`/`reasoning_content` delta → that drives the "thinking" view.
+        # The read body is only `content`, so the scratchpad never enters the read.
         for ch in e.get("choices", []):
-            piece = (ch.get("delta") or {}).get("content")
-            if piece:
-                chunks.append(piece)
-                on_delta(_strip_inspect_partial("".join(chunks)))
+            d = ch.get("delta") or {}
+            r = d.get("reasoning") or d.get("reasoning_content")
+            if r:
+                think.append(r); saw["reasoning"] = True
+                on_delta("thinking", "".join(think))
+            if d.get("content"):
+                chunks.append(d["content"])
+                _emit_text("".join(chunks), saw["reasoning"], on_delta)
 
     _post_stream(f"{base}/chat/completions", payload, headers, openai_event)
     return "".join(chunks)
+
+
+def _emit_text(content_so_far: str, saw_reasoning: bool, on_delta) -> None:
+    """Route a content delta: the NOTE preamble → thinking (only if the model isn't
+    already streaming real reasoning), the analysis → read (INSPECT stripped live)."""
+    notes, body = _split_notes_stream(content_so_far)
+    if notes and not saw_reasoning:
+        on_delta("thinking", notes)
+    if body:
+        on_delta("read", _strip_inspect_partial(body))
 
 
 def citations(text: str):

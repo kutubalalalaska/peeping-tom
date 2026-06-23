@@ -114,6 +114,11 @@ _ROUTES = _build_routes()
 class Settings:
     # --- the read: one or more selectable routes (see _build_routes / .env.example) ---
     routes: tuple = _ROUTES
+    # Ask managed APIs to stream reasoning tokens (OpenRouter `reasoning`) so the
+    # analysis screen can show the model's real chain-of-thought. Off by default
+    # until confirmed on the live endpoint (scripts/probe_reasoning.py); the NOTE
+    # working-line preamble is the always-on fallback "thinking" source.
+    stream_reasoning: bool = _b("READ_STREAM_REASONING")
 
     # --- local media decode ---
     vision_backend: str = os.environ.get("VISION_BACKEND", "ollama")   # ollama | mock

@@ -120,34 +120,44 @@ def _read(job_id: str):
                 recent = (recent + [item])[-12:]
             jobs.set_status(job_id, recent=recent)
 
-        def stream_read(src_text: str, select_k: int) -> str:
-            """Run one streamed read: reset the live partial, push throttled token
-            updates into status.partial_read as they arrive, return the RAW read."""
-            jobs.set_status(job_id, partial_read="")
-            st_w = {"len": 0, "t": 0.0, "started": False}
+        def stream_read(src_text: str, select_k: int):
+            """Run one streamed read. Resets the live channels, then pushes throttled
+            token updates — the model's process into status.partial_thinking (real
+            reasoning if streamed, else the NOTE working-lines) and the analysis into
+            status.partial_read. Returns (read_body, picks)."""
+            jobs.set_status(job_id, partial_read="", partial_thinking="")
+            ch = {"read": {"len": 0, "t": 0.0}, "thinking": {"len": 0, "t": 0.0}}
 
-            def on_delta(text_so_far: str):
+            def on_delta(kind: str, text_so_far: str):
+                s = ch["read" if kind == "read" else "thinking"]
+                field = "partial_read" if kind == "read" else "partial_thinking"
                 now = time.monotonic()
-                if (not st_w["started"]) or now - st_w["t"] >= 0.25:
-                    if len(text_so_far) > st_w["len"] or not st_w["started"]:
-                        st_w["started"], st_w["len"], st_w["t"] = True, len(text_so_far), now
-                        jobs.set_status(job_id, partial_read=text_so_far)
+                if len(text_so_far) > s["len"] and (s["len"] == 0 or now - s["t"] >= 0.2):
+                    s["len"], s["t"] = len(text_so_far), now
+                    jobs.set_status(job_id, **{field: text_so_far})
 
-            return frontier.read(src_text, me, route, select_k=select_k, on_delta=on_delta)
+            raw = frontier.read(src_text, me, route, select_k=select_k, on_delta=on_delta)
+            notes, body, picks = frontier.split_stream_read(raw)
+            # final clean flush: the read body always; thinking only if NOTE-derived
+            # (don't clobber a streamed reasoning trace with an empty notes string).
+            flush = {"partial_read": body}
+            if notes:
+                flush["partial_thinking"] = notes
+            jobs.set_status(job_id, **flush)
+            return body, picks
 
         rounds = settings.max_inspect_rounds if settings.iterative_discovery else 1
         max_imgs = settings.max_inspect_images if settings.iterative_discovery else settings.deep_select_k
         batch = settings.deep_select_k
         text = jobs.path(job_id, "transcript.txt").read_text()
         jobs.set_status(job_id, state="analyzing", route=route.id, model=route.model,
-                        partial_read="", message="the frontier model is reading your chat…")
+                        partial_read="", partial_thinking="",
+                        message="the frontier model is reading your chat…")
 
         seen, inspected, first_read, final, last_added = set(), [], None, None, False
         for _ in range(rounds):
             rem = max_imgs - len(seen)
-            rd, picks = frontier.parse_inspect(
-                stream_read(text, select_k=min(batch, rem) if rem > 0 else 0))
-            jobs.set_status(job_id, partial_read=rd)   # final clean flush for this read
+            rd, picks = stream_read(text, select_k=min(batch, rem) if rem > 0 else 0)
             if first_read is None:
                 first_read = rd
             final, last_added = rd, False
@@ -171,8 +181,7 @@ def _read(job_id: str):
                 break
         if last_added:                               # re-read once on the freshly-enriched transcript
             jobs.set_status(job_id, message="re-reading with the photos in view…")
-            final = frontier.parse_inspect(stream_read(text, select_k=0))[0]
-            jobs.set_status(job_id, partial_read=final)
+            final, _ = stream_read(text, select_k=0)
 
         jobs.path(job_id, "read.json").write_text(json.dumps(
             {"me": me, "read": final, "citations": frontier.citations(final),
