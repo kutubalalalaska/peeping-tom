@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { getResult, getRetained, getMessages, deleteJob, transcriptUrl } from "../api";
 import type { ReadResult, Retained, ReceiptMessage } from "../types";
 import Frame from "./Frame";
@@ -75,6 +75,7 @@ function renderRead(text: string, msgs: Record<number, ReceiptMessage>, me: stri
 
 export default function Result() {
   const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
   const [res, setRes] = useState<ReadResult | null>(null);
   const [retained, setRetained] = useState<Retained | null>(null);
   const [msgs, setMsgs] = useState<Record<number, ReceiptMessage>>({});
@@ -108,7 +109,7 @@ export default function Result() {
       "purging the read ......... gone",
       "purging this session ..... gone",
       "",
-      "✓ nothing remains. you can close the tab.",
+      "✓ nothing remains. starting over…",
     ];
     let i = 0;
     const acc: string[] = [];
@@ -117,6 +118,8 @@ export default function Result() {
       setReceipt([...acc]);
       i++;
       if (i < STEPS.length) window.setTimeout(tick, 400);
+      // receipt finished — let the final line land, then return to the start.
+      else window.setTimeout(() => nav("/"), 1800);
     };
     tick();
   }
