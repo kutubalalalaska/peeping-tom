@@ -18,9 +18,11 @@ services:
     environment:
       VISION_BACKEND: ollama
       OLLAMA_HOST: http://host.docker.internal:11434   # reach the host's native Ollama
-      VISION_MODEL: qwen2.5vl:7b
+      VISION_MODEL: qwen2.5vl:7b                        # DEEP pass (frontier-picked images)
+      VISION_MODEL_FAST: qwen2.5vl:3b                   # CHEAP-ALL pass — REQUIRES: ollama pull qwen2.5vl:3b
+      DECODE_MAX_PX_FAST: "768"                         # smaller images for the cheap-all pass
       WHISPER_MODEL: base
-      FRONTIER_PROVIDER: mock                           # real read needs a frontier endpoint
+      FRONTIER_PROVIDER: mock                           # mock read still drives the 2-pass loop (picks 2 imgs); set a real frontier to test selection quality
       DATA_DIR: /data
     extra_hosts:
       - "host.docker.internal:host-gateway"
