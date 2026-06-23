@@ -1,23 +1,22 @@
 """Local media decoder — runs entirely on the machine (privacy boundary).
 
-  audio   -> Whisper transcription
-  image   -> ONE VLM pass: classify (+people flag) and caption in a single call,
-             caption detail scales with content (people/scene = full, else terse)
-  sticker -> short interpretive caption
-  video   -> keyframe captions (+ audio transcript)
+Two-pass design (cost follows value):
+  - decode_media  = the CHEAP-ALL pass: every image/sticker/video gets a caption
+                    from a small VLM (VISION_MODEL_FAST) at a small resolution.
+                    Audio -> Whisper. This is what the first read sees.
+  - decode_deep   = the DEEP pass: re-caption only the images the FRONTIER read
+                    selected, on the big VLM (VISION_MODEL) at full resolution.
+                    Often 0 images — the read escalates only when it would matter.
 
-Speed levers (the image-encode is the cost on a single GPU):
-  - every image is resized/converted to a capped-size RGB JPEG before the VLM
-    (DECODE_MAX_PX), so the model isn't fed a 12 MP original;
-  - triage + caption are a SINGLE call (no redundant image-encode);
-  - the model is kept warm (keep_alive) and generation is bounded (num_predict,
-    temperature 0).
-The captioner stays BLIND — it never sees surrounding messages.
+Speed levers: the image *encode* is the cost, so we (a) resize before the VLM,
+(b) do ONE call per image (classify + caption together), (c) use a small model
+for the all-images pass and reserve the big model for the picked few, (d) keep
+the model warm and bound generation. The captioner stays BLIND — it never sees
+surrounding messages; the frontier selecting which images to deepen does not feed
+context into the caption, so each caption is still independent evidence.
 
 Vision goes to the bundled Ollama service; audio uses faster-whisper. Images run
-through a thread pool. Decode reports per-item progress (done/total + the item it
-just finished) so the UI can show live glimpses and a completion percentage, and
-prints a timing summary so we can see where the time goes.
+through a thread pool; decode reports per-item progress and prints a timing line.
 """
 
 import base64, json, re, subprocess, time, urllib.request
@@ -44,6 +43,9 @@ COMBINED = (
     "scene, CAPTION is 1-2 precise lines (what/who is shown, setting, visible text, mood); "
     "otherwise CAPTION is at most 8 words. Only what is visible — never guess identities."
 )
+# Deep pass: a rich description regardless of category (the read asked to see it).
+DETAILED = ("Describe this chat image in 2-4 precise lines: what/who is shown, the setting, any "
+            "visible text, the mood, and anything notable. Only what is visible — do not guess identities.")
 STICKER = "WhatsApp sticker. One short line: what it depicts and the emotion it conveys (stickers stand in for words)."
 FRAME = "Frame from a short video in a chat. One line: what it shows."
 RICH = {"people", "scene"}
@@ -58,9 +60,9 @@ def file_type(p: Path) -> str:
     return "document"
 
 
-def _vlm(img: Path, prompt: str, num_predict: int = None):
+def _vlm(img: Path, prompt: str, num_predict: int = None, model: str = None):
     """Run one vision call. Returns (text, elapsed_ms). The image-encode dominates,
-    so callers should pass an already-resized image and avoid extra passes."""
+    so callers pass an already-resized image, one prompt, and the right-sized model."""
     t0 = time.monotonic()
     if settings.vision_backend == "mock":
         import hashlib
@@ -76,7 +78,7 @@ def _vlm(img: Path, prompt: str, num_predict: int = None):
     options = {"temperature": 0}
     if num_predict:
         options["num_predict"] = num_predict
-    payload = {"model": settings.vision_model, "prompt": prompt, "images": [b64],
+    payload = {"model": model or settings.vision_model, "prompt": prompt, "images": [b64],
                "stream": False, "keep_alive": settings.ollama_keep_alive, "options": options}
     req = urllib.request.Request(settings.ollama_host.rstrip("/") + "/api/generate",
                                  data=json.dumps(payload).encode(),
@@ -86,12 +88,13 @@ def _vlm(img: Path, prompt: str, num_predict: int = None):
     return text, (time.monotonic() - t0) * 1000
 
 
-def _prep_image(f: Path, work: Path):
+def _prep_image(f: Path, work: Path, max_px: int = None):
     """Convert to a capped-size RGB JPEG so the VLM gets a cheap, decodable input
     (also handles webp/heic/gif and huge photos). Returns (path, resize_ms);
-    falls back to the original file on any failure. Cached in work/."""
+    falls back to the original file on any failure. Cached per (file, max_px)."""
     t0 = time.monotonic()
-    dst = work / (f.stem + ".vlm.jpg")
+    cap = max_px or settings.decode_max_px
+    dst = work / f"{f.stem}.{cap}.vlm.jpg"
     if dst.exists():
         return dst, (time.monotonic() - t0) * 1000
     try:
@@ -100,7 +103,6 @@ def _prep_image(f: Path, work: Path):
         try: im.seek(0)                                 # first frame of animated webp/gif
         except Exception: pass
         im = im.convert("RGB")
-        cap = settings.decode_max_px
         if max(im.size) > cap:
             im.thumbnail((cap, cap))                    # preserves aspect ratio, in place
         im.save(dst, "JPEG", quality=85)
@@ -141,13 +143,13 @@ def _parse_combined(s: str):
     return category, people, caption
 
 
-def _decode_image(f: Path, kind: str, work: Path):
-    view, resize_ms = (_prep_image(f, work) if settings.vision_backend != "mock" else (f, 0.0))
+def _decode_image(f: Path, kind: str, work: Path, model: str = None, max_px: int = None):
+    view, resize_ms = (_prep_image(f, work, max_px) if settings.vision_backend != "mock" else (f, 0.0))
     if kind == "sticker":
-        cap, ms = _vlm(view, STICKER, num_predict=48)
+        cap, ms = _vlm(view, STICKER, num_predict=48, model=model)
         return f.name, {"type": "sticker", "caption": cap,
                         "_t": {"resize_ms": resize_ms, "infer_ms": ms, "calls": 1}}
-    text, ms = _vlm(view, COMBINED, num_predict=settings.vision_num_predict)
+    text, ms = _vlm(view, COMBINED, num_predict=settings.vision_num_predict, model=model)
     cat, people, caption = _parse_combined(text)
     rec = {"type": "image", "category": cat, "people": people}
     if cat in RICH or people:
@@ -164,7 +166,7 @@ def _caption_of(rec: dict):
             or "; ".join(rec.get("frame_captions", [])) or None)
 
 
-def _timing_summary(out: dict, wall_ms: float):
+def _timing_summary(out: dict, wall_ms: float, model: str, max_px: int):
     """Pop the per-item timing (_t) out of the records and log an aggregate so we
     can see where decode time goes. Records stay clean for media.json."""
     ts = [r.pop("_t") for r in out.values() if "_t" in r]
@@ -174,18 +176,20 @@ def _timing_summary(out: dict, wall_ms: float):
     infer = sum(t["infer_ms"] for t in ts)
     resize = sum(t["resize_ms"] for t in ts)
     calls = sum(t["calls"] for t in ts)
-    print(f"[decode] {n} images/stickers | {calls} VLM calls | wall {wall_ms/1000:.1f}s | "
-          f"infer {infer/1000:.1f}s (avg {infer/n:.0f}ms) | "
+    print(f"[decode/cheap-all] {n} images/stickers | {calls} VLM calls | model={model} | "
+          f"wall {wall_ms/1000:.1f}s | infer {infer/1000:.1f}s (avg {infer/n:.0f}ms) | "
           f"resize {resize/1000:.1f}s (avg {resize/n:.0f}ms) | "
-          f"workers={settings.decode_workers} max_px={settings.decode_max_px}", flush=True)
+          f"workers={settings.decode_workers} max_px={max_px}", flush=True)
 
 
 def decode_media(files, work: Path, on_progress=None) -> dict:
-    """files: list[Path]. Returns {filename: record}. After each decoded item,
-    calls on_progress(done, total, item) where item is {file, type, caption|None}.
-    Caches nothing here — the caller persists media.json."""
+    """CHEAP-ALL pass. files: list[Path]. Returns {filename: record}. After each
+    decoded item calls on_progress(done, total, item={file,type,caption|None}).
+    Images/stickers/video use the small VISION_MODEL_FAST at decode_max_px_fast."""
     work.mkdir(parents=True, exist_ok=True)
     wall0 = time.monotonic()
+    fast_model = settings.vision_model_fast or settings.vision_model
+    fast_px = settings.decode_max_px_fast
     by = {}
     for f in files:
         by.setdefault(file_type(f), []).append(f)
@@ -203,9 +207,9 @@ def decode_media(files, work: Path, on_progress=None) -> dict:
             on_progress(done, total, {"file": name, "type": rec.get("type", "image"),
                                       "caption": _caption_of(rec)})
 
-    # images + stickers, parallel
+    # images + stickers, parallel, on the small model
     with ThreadPoolExecutor(max_workers=settings.decode_workers) as ex:
-        futs = {ex.submit(_decode_image, f, k, work): (f, k) for f, k in img_jobs}
+        futs = {ex.submit(_decode_image, f, k, work, fast_model, fast_px): (f, k) for f, k in img_jobs}
         for fut in as_completed(futs):
             f, k = futs[fut]
             try:
@@ -240,15 +244,15 @@ def decode_media(files, work: Path, on_progress=None) -> dict:
                         rec = {"type": "audio", "error": str(e)}
                     step(f.name, rec)
 
-    # video
+    # video (keyframes on the small model)
     for f in by.get("video", []):
         rec = {"type": "video"}
         frames = _keyframes(f, work)
         try:
             caps = []
             for fr in frames:
-                view, _ = (_prep_image(fr, work) if settings.vision_backend != "mock" else (fr, 0.0))
-                c, _ = _vlm(view, FRAME, num_predict=48)
+                view, _ = (_prep_image(fr, work, fast_px) if settings.vision_backend != "mock" else (fr, 0.0))
+                c, _ = _vlm(view, FRAME, num_predict=48, model=fast_model)
                 caps.append(c)
             rec["frame_captions"] = caps
         except Exception as e:
@@ -258,5 +262,28 @@ def decode_media(files, work: Path, on_progress=None) -> dict:
     for f in by.get("document", []):
         out.setdefault(f.name, {"type": "document"})
 
-    _timing_summary(out, (time.monotonic() - wall0) * 1000)
+    _timing_summary(out, (time.monotonic() - wall0) * 1000, fast_model, fast_px)
+    return out
+
+
+def decode_deep(files, work: Path, on_progress=None) -> dict:
+    """DEEP pass. Re-caption the frontier-SELECTED images on the BIG model at full
+    resolution — a rich description regardless of category. Returns {filename:
+    {caption, tier:'deep'}} for the caller to merge into media.json. Often empty."""
+    work.mkdir(parents=True, exist_ok=True)
+    out = {}
+    model = settings.vision_model
+    files = list(files)
+    for i, f in enumerate(files, 1):
+        try:
+            view, _ = (_prep_image(f, work, settings.decode_max_px)
+                       if settings.vision_backend != "mock" else (f, 0.0))
+            cap, ms = _vlm(view, DETAILED, num_predict=192, model=model)
+            out[f.name] = {"caption": cap, "tier": "deep"}
+            if settings.vision_backend != "mock":
+                print(f"[decode/deep] {f.name} | model={model} | {ms/1000:.1f}s", flush=True)
+        except Exception as e:
+            out[f.name] = {"error": str(e)}
+        if on_progress:
+            on_progress(i, len(files), {"file": f.name, "type": "image", "caption": out[f.name].get("caption")})
     return out

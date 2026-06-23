@@ -76,6 +76,21 @@ def _preprocess(job_id: str):
         jobs.set_status(job_id, state="error", message=f"preprocess failed: {e}")
 
 
+def _image_files_for_ids(job_id: str, ids):
+    """Map frontier-selected message ids -> the image/sticker files attached to them."""
+    mp = jobs.path(job_id, "messages.json")
+    if not mp.exists():
+        return []
+    want = set(ids)
+    names = [fn for m in json.loads(mp.read_text()) if m.get("id") in want for fn in (m.get("media") or [])]
+    files = []
+    for nm in names:
+        hits = list(jobs.path(job_id, "export").rglob(nm))
+        if hits and decode.file_type(hits[0]) in ("image", "sticker"):
+            files.append(hits[0])
+    return files
+
+
 def _read(job_id: str):
     try:
         st = jobs.get_status(job_id) or {}
@@ -84,19 +99,41 @@ def _read(job_id: str):
         if route is None:
             jobs.set_status(job_id, state="needs_config", message=settings.frontier_hint()); return
         text = jobs.path(job_id, "transcript.txt").read_text()
+        k = settings.deep_select_k
         jobs.set_status(job_id, state="analyzing", route=route.id, model=route.model,
                         message="the frontier model is reading your chat…")
-        out = frontier.read(text, me, route)
+        # Pass 1 — read on the cheap (small-VLM) captions; the model may pick images to inspect.
+        first_read, picks = frontier.parse_inspect(frontier.read(text, me, route, select_k=k))
+        picks = list(dict.fromkeys(picks))[:k]            # dedup + cap
+        final, inspected = first_read, []
+
+        # Pass 2 — ONLY if the model asked: deep 7B captions on the picked images, then re-read.
+        files = _image_files_for_ids(job_id, picks) if picks else []
+        if files:
+            jobs.set_status(job_id, message=f"taking a closer look at {len(files)} image(s)…")
+            deep = decode.decode_deep(files, jobs.path(job_id, "work"))
+            media = json.loads(jobs.path(job_id, "media.json").read_text())
+            for name, rec in deep.items():
+                media.setdefault(name, {}).update(rec)
+            jobs.path(job_id, "media.json").write_text(json.dumps(media, ensure_ascii=False, indent=2))
+            msgs = [ingest.Message(**m) for m in json.loads(jobs.path(job_id, "messages.json").read_text())]
+            jobs.path(job_id, "transcript.txt").write_text(T.assemble(msgs, media))
+            inspected = [n for n, r in deep.items() if r.get("caption")]
+            jobs.set_status(job_id, message="re-reading with the photos in view…")
+            final = frontier.read(jobs.path(job_id, "transcript.txt").read_text(), me, route, select_k=0)
+
         jobs.path(job_id, "read.json").write_text(json.dumps(
-            {"me": me, "read": out, "citations": frontier.citations(out),
-             "route": route.id, "model": route.model}, ensure_ascii=False, indent=2))
+            {"me": me, "read": final, "citations": frontier.citations(final),
+             "route": route.id, "model": route.model,
+             "first_read": first_read, "inspected": inspected, "deep_count": len(inspected)},
+            ensure_ascii=False, indent=2))
         deletion = None
         if settings.ephemeral:
             jobs.delete_raw(job_id)
             deletion = {"raw_media_deleted_at": time.strftime("%H:%M:%S"),
                         "transcript_deleted_at": time.strftime("%H:%M:%S")}
         jobs.set_status(job_id, state="done", message="read ready",
-                        deletion=deletion, retained=jobs.retained(job_id))
+                        deletion=deletion, deep_count=len(inspected), retained=jobs.retained(job_id))
     except frontier.NotConfigured as e:
         jobs.set_status(job_id, state="needs_config", message=str(e))
     except Exception as e:

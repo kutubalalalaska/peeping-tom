@@ -121,9 +121,13 @@ class Settings:
     vision_model: str = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
     whisper_model: str = os.environ.get("WHISPER_MODEL", "base")
     decode_workers: int = int(os.environ.get("DECODE_WORKERS", "8"))
-    decode_max_px: int = int(os.environ.get("DECODE_MAX_PX", "1280"))          # cap longest side before the VLM
+    decode_max_px: int = int(os.environ.get("DECODE_MAX_PX", "1280"))          # cap longest side (deep pass)
     vision_num_predict: int = int(os.environ.get("VISION_NUM_PREDICT", "128"))  # cap caption length (tokens)
     ollama_keep_alive: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")        # keep the model warm across calls/jobs
+    # --- two-pass decode: cheap label-all on a small VLM, deep 7B only on frontier-picked images ---
+    vision_model_fast: str = os.environ.get("VISION_MODEL_FAST", "")          # small VLM for the cheap-all pass (e.g. qwen2.5vl:3b); blank = same as vision_model
+    decode_max_px_fast: int = int(os.environ.get("DECODE_MAX_PX_FAST", "768")) # smaller cap for the cheap-all pass
+    deep_select_k: int = int(os.environ.get("DEEP_SELECT_K", "12"))            # max images the frontier may pick for a deep re-caption (0 disables)
 
     # --- hosted-tier behaviour ---
     hosted: bool = _b("HOSTED")                # hosted "exhibit" tier — consent + server-side decode
