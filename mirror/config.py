@@ -127,7 +127,11 @@ class Settings:
     # --- two-pass decode: cheap label-all on a small VLM, deep 7B only on frontier-picked images ---
     vision_model_fast: str = os.environ.get("VISION_MODEL_FAST", "")          # small VLM for the cheap-all pass (e.g. qwen2.5vl:3b); blank = same as vision_model
     decode_max_px_fast: int = int(os.environ.get("DECODE_MAX_PX_FAST", "768")) # smaller cap for the cheap-all pass
-    deep_select_k: int = int(os.environ.get("DEEP_SELECT_K", "12"))            # max images the frontier may pick for a deep re-caption (0 disables)
+    deep_select_k: int = int(os.environ.get("DEEP_SELECT_K", "12"))            # per-round image-pick cap (also the single-round cap)
+    # --- iterative discovery: text+audio first, then the frontier requests images in capped rounds ---
+    iterative_discovery: bool = _b("ITERATIVE_DISCOVERY")                     # off = cheap-all up front (1 round); on = text-first, multi-round
+    max_inspect_rounds: int = int(os.environ.get("MAX_INSPECT_ROUNDS", "3"))  # cap on frontier image-request rounds
+    max_inspect_images: int = int(os.environ.get("MAX_INSPECT_IMAGES", "24")) # cap on total images deep-analyzed across all rounds
 
     # --- hosted-tier behaviour ---
     hosted: bool = _b("HOSTED")                # hosted "exhibit" tier — consent + server-side decode

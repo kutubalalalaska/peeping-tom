@@ -49,8 +49,13 @@ def _preprocess(job_id: str):
             jobs.set_status(job_id, state="error", message="couldn't read any messages from this export"); return
 
         media = ingest.media_files(exp)
-        total = sum(1 for f in media if decode.file_type(f) in _DECODABLE)
-        jobs.set_status(job_id, state="inspecting", message="decoding your media on this machine…",
+        # Iterative discovery decodes only audio up front (text-first); images are
+        # decoded on demand during the read loop. Otherwise: cheap-all decode now.
+        to_decode = [f for f in media if decode.file_type(f) == "audio"] if settings.iterative_discovery else media
+        total = sum(1 for f in to_decode if decode.file_type(f) in _DECODABLE)
+        msg = ("transcribing voice notes on this machine…" if settings.iterative_discovery
+               else "decoding your media on this machine…")
+        jobs.set_status(job_id, state="inspecting", message=msg,
                         participants=ingest.participants(msgs), recent=[],
                         progress={"done": 0, "total": total, "pct": 0 if total else 100})
 
@@ -62,7 +67,7 @@ def _preprocess(job_id: str):
             pct = int(done * 100 / total) if total else 100
             jobs.set_status(job_id, progress={"done": done, "total": total, "pct": pct}, recent=recent)
 
-        decoded = decode.decode_media(media, jobs.path(job_id, "work"), on_progress)
+        decoded = decode.decode_media(to_decode, jobs.path(job_id, "work"), on_progress)
         jobs.path(job_id, "media.json").write_text(json.dumps(decoded, ensure_ascii=False, indent=2))
         jobs.path(job_id, "transcript.txt").write_text(T.assemble(msgs, decoded))
         # structured transcript, keyed by id — powers clickable [#id] receipts
@@ -92,35 +97,59 @@ def _image_files_for_ids(job_id: str, ids):
 
 
 def _read(job_id: str):
+    """Read the chat, letting the frontier model request a deeper look at images.
+    Default: one round (cheap-all already decoded). ITERATIVE_DISCOVERY: text-first,
+    up to MAX_INSPECT_ROUNDS rounds, capped at MAX_INSPECT_IMAGES total."""
     try:
         st = jobs.get_status(job_id) or {}
         me = st.get("me", "me")
         route = settings.route(st.get("route"))
         if route is None:
             jobs.set_status(job_id, state="needs_config", message=settings.frontier_hint()); return
+
+        def glimpse(done, total, item):              # reuse the live media feed during the loop
+            cur = jobs.get_status(job_id) or {}
+            recent = cur.get("recent", [])
+            if item and item.get("caption"):
+                recent = (recent + [item])[-12:]
+            jobs.set_status(job_id, recent=recent)
+
+        rounds = settings.max_inspect_rounds if settings.iterative_discovery else 1
+        max_imgs = settings.max_inspect_images if settings.iterative_discovery else settings.deep_select_k
+        batch = settings.deep_select_k
         text = jobs.path(job_id, "transcript.txt").read_text()
-        k = settings.deep_select_k
         jobs.set_status(job_id, state="analyzing", route=route.id, model=route.model,
                         message="the frontier model is reading your chat…")
-        # Pass 1 — read on the cheap (small-VLM) captions; the model may pick images to inspect.
-        first_read, picks = frontier.parse_inspect(frontier.read(text, me, route, select_k=k))
-        picks = list(dict.fromkeys(picks))[:k]            # dedup + cap
-        final, inspected = first_read, []
 
-        # Pass 2 — ONLY if the model asked: deep 7B captions on the picked images, then re-read.
-        files = _image_files_for_ids(job_id, picks) if picks else []
-        if files:
-            jobs.set_status(job_id, message=f"taking a closer look at {len(files)} image(s)…")
-            deep = decode.decode_deep(files, jobs.path(job_id, "work"))
+        seen, inspected, first_read, final, last_added = set(), [], None, None, False
+        for _ in range(rounds):
+            rem = max_imgs - len(seen)
+            rd, picks = frontier.parse_inspect(
+                frontier.read(text, me, route, select_k=min(batch, rem) if rem > 0 else 0))
+            if first_read is None:
+                first_read = rd
+            final, last_added = rd, False
+            picks = [i for i in dict.fromkeys(picks) if i not in seen][:rem]
+            files = _image_files_for_ids(job_id, picks) if picks else []
+            if not files:
+                break                                # the model is satisfied (or nothing to fetch)
+            jobs.set_status(job_id, message=f"opening {len(files)} image(s) the read flagged…")
+            deep = decode.decode_deep(files, jobs.path(job_id, "work"), on_progress=glimpse)
             media = json.loads(jobs.path(job_id, "media.json").read_text())
             for name, rec in deep.items():
                 media.setdefault(name, {}).update(rec)
             jobs.path(job_id, "media.json").write_text(json.dumps(media, ensure_ascii=False, indent=2))
             msgs = [ingest.Message(**m) for m in json.loads(jobs.path(job_id, "messages.json").read_text())]
-            jobs.path(job_id, "transcript.txt").write_text(T.assemble(msgs, media))
-            inspected = [n for n, r in deep.items() if r.get("caption")]
+            text = T.assemble(msgs, media)
+            jobs.path(job_id, "transcript.txt").write_text(text)
+            seen.update(picks)
+            inspected += [n for n, rc in deep.items() if rc.get("caption")]
+            last_added = True
+            if len(seen) >= max_imgs:
+                break
+        if last_added:                               # re-read once on the freshly-enriched transcript
             jobs.set_status(job_id, message="re-reading with the photos in view…")
-            final = frontier.read(jobs.path(job_id, "transcript.txt").read_text(), me, route, select_k=0)
+            final = frontier.parse_inspect(frontier.read(text, me, route, select_k=0))[0]
 
         jobs.path(job_id, "read.json").write_text(json.dumps(
             {"me": me, "read": final, "citations": frontier.citations(final),
