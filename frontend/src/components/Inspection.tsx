@@ -110,6 +110,38 @@ function LiveRead({ text }: { text: string }) {
   );
 }
 
+// The model's live "thinking" view (status.partial_thinking) — its process, not
+// the finished prose. Shows honest motion during the wait instead of replaying a
+// done read for effect. Handles both shapes the backend may send: a few short
+// working-lines (NOTE-derived) or a longer raw reasoning stream — we render the
+// tail either way so it stays compact.
+function ThinkingTicker({ text, sf }: { text: string; sf: number }) {
+  const spin = SPIN[sf % SPIN.length];
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const asList = lines.length >= 2;
+  const view = asList ? lines.slice(-5) : [text.length > 280 ? "…" + text.slice(-280) : text];
+  return (
+    <div className="thinking">
+      <div className="th-head">{spin}&nbsp;&nbsp;thinking…</div>
+      <div className="th-lines">
+        {view.map((l, i) => {
+          const last = i === view.length - 1;
+          return (
+            <div
+              key={i}
+              className={"th-line" + (last ? " active" : "")}
+              style={asList ? { opacity: 0.35 + 0.65 * ((i + 1) / view.length) } : undefined}
+            >
+              {l}
+              {last && <span className="th-cur" />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Decode/parse → select yourself → (send) → the read. One screen spans
 // uploaded → inspecting → ready → analyzing, then navigates to /result on done.
 export default function Inspection() {
@@ -180,6 +212,7 @@ export default function Inspection() {
   // (the relocated media spectacle), then re-reading with them in view.
   if (sending || state === "analyzing") {
     const msg = s?.message ?? "the model is reading the transcript…";
+    const thinking = s?.partial_thinking?.trim();
     const partial = s?.partial_read?.trim();
     // The deep-look sub-phase. The backend leaves partial_read holding the prior
     // read while it opens images, so the carousel (the relocated media spectacle)
@@ -188,6 +221,9 @@ export default function Inspection() {
     const imgs = recent.filter((it) => it.type !== "audio");
     const showCarousel = opening && imgs.length > 0;
     const showRead = !showCarousel && !!partial;
+    // Honest motion while we wait: the model's live thinking shows first, and the
+    // read takes over the moment it actually starts writing.
+    const showThinking = !showCarousel && !showRead && !!thinking;
     return (
       <Frame
         step="step 5/5 · the read"
@@ -199,6 +235,10 @@ export default function Inspection() {
           <Carousel recent={imgs} sf={sf} label="just opened" />
         ) : showRead ? (
           <LiveRead text={partial!} />
+        ) : showThinking ? (
+          <div className="pcontent">
+            <ThinkingTicker text={thinking!} sf={sf} />
+          </div>
         ) : (
           <div className="pcontent">
             <div className="up">
