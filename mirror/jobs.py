@@ -10,7 +10,7 @@ hidden in memory, so the whole lifecycle is inspectable.
         status.json         {state, message, source, me, participants, progress, recent, ...}
 """
 
-import json, shutil, threading, time, uuid
+import json, os, shutil, threading, time, uuid
 from pathlib import Path
 
 from .config import settings
@@ -48,7 +48,12 @@ def set_status(job_id: str, **fields):
     with _LOCK:
         cur = get_status(job_id) or {}
         cur.update(fields); cur["ts"] = time.time()
-        (d / "status.json").write_text(json.dumps(cur, ensure_ascii=False, indent=2))
+        # Write atomically: the status poller reads status.json WITHOUT the lock,
+        # and streamed reads update it many times a second — a temp-file + rename
+        # means a reader never catches a half-written file.
+        tmp = d / "status.json.tmp"
+        tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2))
+        os.replace(tmp, d / "status.json")
         return cur
 
 
