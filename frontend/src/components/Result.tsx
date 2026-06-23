@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getResult, getRetained, getMessages, deleteJob, transcriptUrl } from "../api";
-import type { ReadResult, Retained, ReceiptMessage } from "../types";
+import { getResult, getRetained, getMessages, deleteJob, transcriptUrl, mediaUrl } from "../api";
+import type { ReadResult, Retained, ReceiptMessage, ReceiptMedia } from "../types";
 import Frame from "./Frame";
 import { seedOf, thumb, wave } from "../lib/ascii";
 
@@ -21,10 +21,39 @@ function sidesOf(msgs: Record<number, ReceiptMessage>): Record<string, "me" | "t
   return map;
 }
 
+// A cited attachment: the REAL photo, served locally from the export (the evidence
+// thesis made tangible — the actual image beside its blind caption). Falls back to
+// the ASCII thumb if it can't render (a non-browser format, or the raw media was
+// already deleted on the ephemeral path). Audio/video keep their ASCII glyph.
+function BubbleMedia({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
+  const [failed, setFailed] = useState(false);
+  const isPhoto = md.type === "image" || md.type === "sticker";
+  return (
+    <figure className="b-media">
+      {isPhoto && jobId && !failed ? (
+        <img
+          className="b-photo"
+          src={mediaUrl(jobId, md.file)}
+          alt={md.caption || md.file}
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 20, 6)}</pre>
+      )}
+      {md.caption && (
+        <figcaption>
+          “{md.caption}” <span className="b-blind">— blind caption</span>
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
 // The cited message(s), rendered inline as real chat bubbles — the one piece of
 // styling the read carries. Actors split left/right (see sidesOf), so a quoted
 // exchange reads the way it did in the app.
-function ChatBubbles({ msgs, sides }: { msgs: ReceiptMessage[]; sides: Record<string, "me" | "them"> }) {
+function ChatBubbles({ msgs, sides, jobId }: { msgs: ReceiptMessage[]; sides: Record<string, "me" | "them">; jobId: string }) {
   return (
     <div className="bubbles">
       {msgs.map((m) => (
@@ -34,14 +63,7 @@ function ChatBubbles({ msgs, sides }: { msgs: ReceiptMessage[]; sides: Record<st
           </div>
           {m.text && <div className="b-text">{m.text}</div>}
           {m.media.map((md) => (
-            <figure className="b-media" key={md.file}>
-              <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 20, 6)}</pre>
-              {md.caption && (
-                <figcaption>
-                  “{md.caption}” <span className="b-blind">— blind caption</span>
-                </figcaption>
-              )}
-            </figure>
+            <BubbleMedia key={md.file} jobId={jobId} md={md} />
           ))}
         </div>
       ))}
@@ -54,7 +76,7 @@ const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
 // The read: flowing prose, with each [#id] citation (or a run of them) expanded
 // in place into a chat-bubble cluster of the messages it points to. `##` lines,
 // if the model emits any, degrade to a light subheading.
-function renderRead(text: string, msgs: Record<number, ReceiptMessage>): ReactNode[] {
+function renderRead(text: string, msgs: Record<number, ReceiptMessage>, jobId: string): ReactNode[] {
   const out: ReactNode[] = [];
   const sides = sidesOf(msgs);
   let firstProse = true;
@@ -70,7 +92,7 @@ function renderRead(text: string, msgs: Record<number, ReceiptMessage>): ReactNo
       if (/\[#\d+\]/.test(tok)) {
         const ids = [...new Set([...tok.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))];
         const cited = ids.map((id) => msgs[id]).filter(Boolean) as ReceiptMessage[];
-        if (cited.length) out.push(<ChatBubbles key={"b" + bi + "_" + ti} msgs={cited} sides={sides} />);
+        if (cited.length) out.push(<ChatBubbles key={"b" + bi + "_" + ti} msgs={cited} sides={sides} jobId={jobId} />);
       } else {
         const p = tok.trim();
         if (p && !PUNCT_ONLY.test(p)) {
@@ -154,7 +176,7 @@ export default function Result() {
       custody={nuked ? "✓ nothing remains" : "✓ raw media stays local · the read is yours to keep or destroy"}
     >
       <div className="read">
-        {renderRead(res.read, msgs)}
+        {renderRead(res.read, msgs, id ?? "")}
 
         {res.deep_count ? (
           <p className="prov">

@@ -161,6 +161,9 @@ button { font: inherit; cursor: pointer; }
 .bubble .b-text { white-space: pre-wrap; word-break: break-word; }
 .bubble .b-media { margin: 8px 0 0; }
 .bubble .b-media pre { font-size: 8px; line-height: 1.05; margin: 0; white-space: pre; }
+/* the real cited photo, framed to sit in the mono/black-on-white system */
+.bubble .b-media .b-photo { display: block; width: 100%; max-width: 240px; height: auto; margin: 0; border: 1px solid var(--ink); }
+.bubble.me .b-media .b-photo { border-color: rgba(255,255,255,.45); }
 .bubble .b-media figcaption { font-size: 12px; color: var(--secondary); line-height: 1.45; margin-top: 4px; }
 .bubble.me .b-media figcaption { color: rgba(255,255,255,.82); }
 .bubble .b-blind { color: var(--muted); font-style: italic; font-size: 10.5px; }
