@@ -5,78 +5,70 @@ import type { ReadResult, Retained, ReceiptMessage } from "../types";
 import Frame from "./Frame";
 import { seedOf, thumb, wave } from "../lib/ascii";
 
-// A cited message (or a small run of them) rendered as a centered, styled block
-// inserted into the read body — the claim, then the receipt, in line.
-function QuoteBlock({ msgs, me }: { msgs: ReceiptMessage[]; me: string }) {
+// The cited message(s), rendered inline as real chat bubbles — the one piece of
+// styling the read carries. "you" sits on the right (ink), everyone else on the
+// left (light), so a quoted exchange reads the way it did in the app.
+function ChatBubbles({ msgs, me }: { msgs: ReceiptMessage[]; me: string }) {
   return (
-    <div className="quote">
-      {msgs.map((m) => (
-        <div className="q-msg" key={m.id}>
-          <div className="q-meta">
-            {m.sender} · {m.ts} · #{m.id}
+    <div className="bubbles">
+      {msgs.map((m) => {
+        const mine = m.sender === me;
+        return (
+          <div className={"bubble " + (mine ? "me" : "them")} key={m.id}>
+            <div className="b-meta">
+              {m.sender} · {m.ts}
+            </div>
+            {m.text && <div className="b-text">{m.text}</div>}
+            {m.media.map((md) => (
+              <figure className="b-media" key={md.file}>
+                <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 20, 6)}</pre>
+                {md.caption && (
+                  <figcaption>
+                    “{md.caption}” <span className="b-blind">— blind caption</span>
+                  </figcaption>
+                )}
+              </figure>
+            ))}
           </div>
-          {m.text && <div className={"q-line" + (m.sender === me ? " you" : "")}>{m.text}</div>}
-          {m.media.map((md) => (
-            <figure className="q-media" key={md.file}>
-              <pre>{md.type === "audio" ? wave(seedOf(md.file), 16) : thumb(seedOf(md.file), 22, 7)}</pre>
-              {md.caption && (
-                <figcaption>
-                  “{md.caption}” <span className="q-blind">— blind caption</span>
-                </figcaption>
-              )}
-            </figure>
-          ))}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
 
-// Prose + inline citation quote-blocks for one section's body.
-function renderBody(
-  body: string,
-  msgs: Record<number, ReceiptMessage>,
-  me: string,
-  teaser: boolean,
-  kp: string
-): ReactNode[] {
-  const out: ReactNode[] = [];
-  body.split(/((?:\s*\[#\d+\])+)/g).forEach((tok, ti) => {
-    const isCite = /^(?:\s*\[#\d+\])+$/.test(tok) && tok.trim() !== "";
-    if (isCite) {
-      const ids = [...new Set([...tok.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))];
-      const cited = ids.map((id) => msgs[id]).filter(Boolean) as ReceiptMessage[];
-      if (cited.length) out.push(<QuoteBlock key={kp + "q" + ti} msgs={cited} me={me} />);
-    } else {
-      tok.split(/\n\n+/).forEach((para, pi) => {
-        const p = para.trim();
-        if (!p || PUNCT_ONLY.test(p)) return;
-        out.push(
-          <p key={kp + "p" + ti + "_" + pi} className={teaser ? "teaser" : ""}>
-            {p}
-          </p>
-        );
-      });
-    }
-  });
-  return out;
-}
-
-// The read as a reading: a teaser, then `## chapter` sections, each flowing prose
-// with its cited messages inline, ending on the model's stated limits.
+// The read: flowing prose, with each [#id] citation (or a run of them) expanded
+// in place into a chat-bubble cluster of the messages it points to. `##` lines,
+// if the model emits any, degrade to a light subheading.
 function renderRead(text: string, msgs: Record<number, ReceiptMessage>, me: string): ReactNode[] {
-  const sections: { title: string | null; body: string }[] = [{ title: null, body: "" }];
-  text.split("\n").forEach((line) => {
-    const h = line.match(/^\s*##\s+(.*\S)\s*$/);
-    if (h) sections.push({ title: h[1].trim(), body: "" });
-    else sections[sections.length - 1].body += line + "\n";
-  });
   const out: ReactNode[] = [];
-  sections.forEach((sec, si) => {
-    if (sec.title) out.push(<h2 className="chapter" key={"h" + si}>{sec.title}</h2>);
-    out.push(...renderBody(sec.body, msgs, me, si === 0 && !sec.title, "s" + si));
+  let firstProse = true;
+  text.split(/\n\n+/).forEach((block, bi) => {
+    const b = block.trim();
+    if (!b) return;
+    const head = b.match(/^#{2,}\s+(.*\S)\s*$/);
+    if (head) {
+      out.push(<h2 className="subhead" key={"h" + bi}>{head[1]}</h2>);
+      return;
+    }
+    b.split(/((?:\s*\[#\d+\])+)/g).forEach((tok, ti) => {
+      if (/\[#\d+\]/.test(tok)) {
+        const ids = [...new Set([...tok.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))];
+        const cited = ids.map((id) => msgs[id]).filter(Boolean) as ReceiptMessage[];
+        if (cited.length) out.push(<ChatBubbles key={"b" + bi + "_" + ti} msgs={cited} me={me} />);
+      } else {
+        const p = tok.trim();
+        if (p && !PUNCT_ONLY.test(p)) {
+          out.push(
+            <p key={"p" + bi + "_" + ti} className={firstProse ? "lede" : ""}>
+              {p}
+            </p>
+          );
+          firstProse = false;
+        }
+      }
+    });
   });
   return out;
 }

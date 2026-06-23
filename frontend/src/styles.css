@@ -136,39 +136,27 @@ button { font: inherit; cursor: pointer; }
 /* ---- the read ---- */
 .read p { font-size: 16px; line-height: 1.85; margin: 22px 0 0; }
 .read .lede { font-size: clamp(19px, 2.6vw, 24px); font-weight: 500; line-height: 1.25; margin-top: 0; }
-.read .teaser { font-size: clamp(16px, 1.9vw, 19px); font-weight: 500; line-height: 1.55; color: var(--ink); margin: 20px 0 0; }
-.read .teaser + .teaser { margin-top: 14px; }
-.chapter { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink); margin: 36px 0 2px; padding-top: 16px; border-top: 1px solid var(--hairline); }
-.cite {
-  background: var(--ink); color: #fff; border: none; padding: 1px 4px; font-size: .8em;
-  vertical-align: 1px;
-}
-.cite:hover { box-shadow: 0 0 0 2px var(--ink); }
-.excerpt { border-left: 2px solid var(--ink); padding: 11px 0 11px 16px; margin: 18px 0; }
-.excerpt .x-meta { font-size: 11px; color: var(--muted); }
-.excerpt .x-line { font-size: 13.5px; line-height: 1.7; margin-top: 3px; }
-.excerpt .who { color: var(--muted); display: inline-block; width: 64px; }
-.excerpt .you .who { color: var(--ink); }
-.flash { animation: fl 1.1s ease; }
-.rmedia {
-  display: flex; gap: 16px; align-items: flex-start; margin: 18px 0; padding: 13px 0;
-  border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
-}
-.rmedia pre { font-size: 9px; line-height: 1.06; margin: 0; }
-.rmedia .m-tag { font-size: 12px; }
-.rmedia .m-cap { font-size: 13px; color: var(--secondary); }
-.rmedia .m-blind { font-size: 11px; color: var(--muted); margin-top: 5px; font-style: italic; }
+.read .subhead { font-size: 13px; font-weight: 500; color: var(--secondary); margin: 30px 0 0; }
 
-/* citation quote block — the cited message(s), centered in the read body */
-.quote { max-width: 600px; margin: 24px auto; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 16px 20px; }
-.quote .q-msg + .q-msg { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline-2); }
-.quote .q-meta { font-size: 11px; color: var(--muted); letter-spacing: .04em; text-align: center; margin-bottom: 7px; }
-.quote .q-line { font-size: 14.5px; line-height: 1.65; color: var(--secondary); }
-.quote .q-line.you { color: var(--ink); }
-.quote .q-media { display: flex; gap: 14px; align-items: flex-start; margin: 12px 0 0; }
-.quote .q-media pre { font-size: 9px; line-height: 1.06; margin: 0; }
-.quote .q-media figcaption { font-size: 12.5px; color: var(--secondary); line-height: 1.45; }
-.quote .q-blind { color: var(--muted); font-style: italic; font-size: 11px; }
+/* cited messages, rendered inline as chat bubbles — the one styled element the
+   read carries. A scoped, deliberate nod to the source app (rounded corners with
+   a flattened speaker-side corner); everything else stays square per the system. */
+.bubbles { display: flex; flex-direction: column; gap: 7px; max-width: 600px; margin: 22px auto; }
+.bubble {
+  max-width: 80%; padding: 9px 13px; border-radius: 13px; font-size: 14.5px; line-height: 1.55;
+  border: 1px solid var(--hairline);
+}
+.bubble.them { align-self: flex-start; background: #f1f1f1; color: var(--ink); border-bottom-left-radius: 3px; }
+.bubble.me { align-self: flex-end; background: var(--ink); color: #fff; border-color: var(--ink); border-bottom-right-radius: 3px; }
+.bubble .b-meta { font-size: 10.5px; color: var(--muted); letter-spacing: .03em; margin-bottom: 3px; }
+.bubble.me .b-meta { color: rgba(255,255,255,.6); }
+.bubble .b-text { white-space: pre-wrap; word-break: break-word; }
+.bubble .b-media { margin: 8px 0 0; }
+.bubble .b-media pre { font-size: 8px; line-height: 1.05; margin: 0; white-space: pre; }
+.bubble .b-media figcaption { font-size: 12px; color: var(--secondary); line-height: 1.45; margin-top: 4px; }
+.bubble.me .b-media figcaption { color: rgba(255,255,255,.82); }
+.bubble .b-blind { color: var(--muted); font-style: italic; font-size: 10.5px; }
+.bubble.me .b-blind { color: rgba(255,255,255,.55); }
 
 .provoke {
   font-size: clamp(15px, 1.9vw, 18px); line-height: 1.5; font-weight: 500; margin-top: 30px;
