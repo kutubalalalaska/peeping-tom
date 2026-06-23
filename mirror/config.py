@@ -124,6 +124,7 @@ class Settings:
     decode_max_px: int = int(os.environ.get("DECODE_MAX_PX", "1280"))          # cap longest side (deep pass)
     vision_num_predict: int = int(os.environ.get("VISION_NUM_PREDICT", "128"))  # cap caption length (tokens)
     ollama_keep_alive: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")        # keep the model warm across calls/jobs
+    vision_timeout: int = int(os.environ.get("VISION_TIMEOUT", "90"))          # per-VLM-call timeout (s) — bounds a hung image
     # --- two-pass decode: cheap label-all on a small VLM, deep 7B only on frontier-picked images ---
     vision_model_fast: str = os.environ.get("VISION_MODEL_FAST", "")          # small VLM for the cheap-all pass (e.g. qwen2.5vl:3b); blank = same as vision_model
     decode_max_px_fast: int = int(os.environ.get("DECODE_MAX_PX_FAST", "768")) # smaller cap for the cheap-all pass

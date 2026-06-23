@@ -61,10 +61,14 @@ def _mock_read(transcript: str, me: str, select_k: int = 0) -> str:
     c = "".join(f"[#{i}]" for i in pick[:3])
     d = "".join(f"[#{i}]" for i in pick[3:6])
     out = (
-        f"[MOCK READ — no frontier model configured; this is a flow placeholder]\n\n"
-        f"You tend to express care through logistics rather than words {c}. "
-        f"Across the arc of the conversation that pattern recurs and shifts over time {d}.\n\n"
-        f"Set FRONTIER_PROVIDER + FRONTIER_BASE_URL + FRONTIER_MODEL for the real read of {me}."
+        f"You express care through logistics more than words, and you concede only once "
+        f"you've already won the point.\n\n"
+        f"## the patterns\n\n"
+        f"You handle disagreement by going quiet rather than escalating {c}.\n\n"
+        f"## the arc over time\n\n"
+        f"The exchange warms early, and over time the initiating shifts to one side {d}.\n\n"
+        f"## what i couldn't determine\n\n"
+        f"(mock read — set a real frontier route for the actual read of {me}.)"
     )
     if select_k:
         img_ids = re.findall(r"^#(\d+)\b.*\[(?:image|sticker|video)", transcript, re.M | re.I)

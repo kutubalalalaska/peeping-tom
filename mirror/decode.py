@@ -83,7 +83,7 @@ def _vlm(img: Path, prompt: str, num_predict: int = None, model: str = None):
     req = urllib.request.Request(settings.ollama_host.rstrip("/") + "/api/generate",
                                  data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as r:
+    with urllib.request.urlopen(req, timeout=settings.vision_timeout) as r:
         text = json.loads(r.read())["response"].strip()
     return text, (time.monotonic() - t0) * 1000
 
@@ -98,9 +98,12 @@ def _prep_image(f: Path, work: Path, max_px: int = None):
     if dst.exists():
         return dst, (time.monotonic() - t0) * 1000
     try:
-        from PIL import Image
+        from PIL import Image, ImageFile
+        ImageFile.LOAD_TRUNCATED_IMAGES = True          # tolerate truncated/partial files
         im = Image.open(f)
         try: im.seek(0)                                 # first frame of animated webp/gif
+        except Exception: pass
+        try: im.draft("RGB", (cap, cap))                # let the JPEG decoder downscale on load (fast on huge photos)
         except Exception: pass
         im = im.convert("RGB")
         if max(im.size) > cap:
@@ -267,23 +270,45 @@ def decode_media(files, work: Path, on_progress=None) -> dict:
 
 
 def decode_deep(files, work: Path, on_progress=None) -> dict:
-    """DEEP pass. Re-caption the frontier-SELECTED images on the BIG model at full
-    resolution — a rich description regardless of category. Returns {filename:
-    {caption, tier:'deep'}} for the caller to merge into media.json. Often empty."""
+    """DEEP pass. Re-caption the frontier-SELECTED images on the small/fast model
+    (the 3B) at full resolution with the DETAILED prompt — a richer look at the few
+    images the read asked to see (no big-model tier; the 3B is enough, per the
+    baseline). Returns {filename: {caption, tier:'deep'}} to merge into media.json.
+    Runs in parallel and is bounded: a hung/bad image is skipped, never stalls the batch."""
+    import concurrent.futures as _cf
     work.mkdir(parents=True, exist_ok=True)
-    out = {}
-    model = settings.vision_model
-    files = list(files)
-    for i, f in enumerate(files, 1):
-        try:
-            view, _ = (_prep_image(f, work, settings.decode_max_px)
-                       if settings.vision_backend != "mock" else (f, 0.0))
-            cap, ms = _vlm(view, DETAILED, num_predict=192, model=model)
-            out[f.name] = {"caption": cap, "tier": "deep"}
-            if settings.vision_backend != "mock":
-                print(f"[decode/deep] {f.name} | model={model} | {ms/1000:.1f}s", flush=True)
-        except Exception as e:
-            out[f.name] = {"error": str(e)}
-        if on_progress:
-            on_progress(i, len(files), {"file": f.name, "type": "image", "caption": out[f.name].get("caption")})
+    model = settings.vision_model_fast or settings.vision_model
+    out, files = {}, list(files)
+    if not files:
+        return out
+
+    def one(f):
+        view, _ = (_prep_image(f, work, settings.decode_max_px)
+                   if settings.vision_backend != "mock" else (f, 0.0))
+        cap, ms = _vlm(view, DETAILED, num_predict=settings.vision_num_predict, model=model)
+        return {"caption": cap, "tier": "deep", "_ms": ms}
+
+    ex = ThreadPoolExecutor(max_workers=settings.decode_workers)
+    futs = {ex.submit(one, f): f for f in files}
+    budget = settings.vision_timeout * 2 + 30           # overall wall budget for the (parallel) batch
+    done = 0
+    try:
+        for fut in as_completed(futs, timeout=budget):
+            f = futs[fut]; done += 1
+            try:
+                rec = fut.result(); ms = rec.pop("_ms", 0); out[f.name] = rec
+                if settings.vision_backend != "mock":
+                    print(f"[decode/deep] {f.name} | {ms/1000:.1f}s", flush=True)
+            except Exception as e:
+                out[f.name] = {"error": str(e)}
+                if settings.vision_backend != "mock":
+                    print(f"[decode/deep] {f.name} | ERROR: {e}", flush=True)
+            if on_progress:
+                on_progress(done, len(files), {"file": f.name, "type": "image", "caption": out[f.name].get("caption")})
+    except _cf.TimeoutError:
+        for fut, f in futs.items():                     # whatever didn't finish in time → skip, don't stall
+            if f.name not in out:
+                out[f.name] = {"error": "deep timeout (skipped)"}
+                print(f"[decode/deep] {f.name} | SKIPPED (batch timeout)", flush=True)
+    ex.shutdown(wait=False)
     return out

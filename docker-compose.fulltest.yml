@@ -30,6 +30,7 @@ services:
       VISION_MODEL: qwen2.5vl:7b                       # DEEP pass (GLM-picked images)
       VISION_MODEL_FAST: qwen2.5vl:3b                  # CHEAP-ALL pass — REQUIRES the pull above
       DECODE_MAX_PX_FAST: "768"
+      ITERATIVE_DISCOVERY: "1"                          # text+audio first; GLM requests images in capped rounds (no cheap-all)
       WHISPER_MODEL: base
       EPHEMERAL: "0"                                    # keep artifacts so we can inspect the test
       DATA_DIR: /data
