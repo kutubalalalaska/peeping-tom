@@ -6,7 +6,7 @@ import Frame from "./Frame";
 type Platform = "whatsapp" | "telegram";
 type OS = "iphone" | "android";
 
-const STEPS: Record<OS, string[]> = {
+const WA_STEPS: Record<OS, string[]> = {
   iphone: [
     "open the chat in whatsapp.",
     "tap the contact / group name at the top.",
@@ -22,6 +22,15 @@ const STEPS: Record<OS, string[]> = {
   ],
 };
 
+// Telegram's machine-readable export is desktop-only (mobile can't produce it).
+const TG_STEPS: string[] = [
+  "open telegram on desktop (export isn’t on mobile).",
+  "open the chat → ⋮ → “export chat history”.",
+  "set format to “machine-readable JSON”.",
+  "tick photos, voice & video messages, and stickers.",
+  "zip the exported folder, drop the .zip below.",
+];
+
 export default function Start() {
   const [platform, setPlatform] = useState<Platform | null>(null);
   const [os, setOs] = useState<OS>("iphone");
@@ -33,11 +42,11 @@ export default function Start() {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    if (!file || !platform) return;
     setErr(null);
     setBusy(true);
     try {
-      const { job_id } = await uploadChat(file, "whatsapp");
+      const { job_id } = await uploadChat(file, platform);
       nav(`/job/${job_id}`);
     } catch (e) {
       setErr(String(e));
@@ -53,8 +62,8 @@ export default function Start() {
             <button className="opt" onClick={() => setPlatform("whatsapp")}>
               [ whatsapp ]
             </button>
-            <button className="opt" disabled>
-              [ telegram · soon ]
+            <button className="opt" onClick={() => setPlatform("telegram")}>
+              [ telegram ]
             </button>
           </div>
         </div>
@@ -62,34 +71,38 @@ export default function Start() {
     );
   }
 
+  const steps = platform === "telegram" ? TG_STEPS : WA_STEPS[os];
+
   return (
     <Frame
       step="step 2/4 · export"
-      hero="export from whatsapp"
+      hero={`export from ${platform}`}
       nav={<button onClick={() => setPlatform(null)}>[ ← back ]</button>}
     >
       <form onSubmit={submit}>
-        <div className="ln">
-          <div className="row">
-            <button
-              type="button"
-              className={"opt" + (os === "iphone" ? " sel" : "")}
-              onClick={() => setOs("iphone")}
-            >
-              [ iphone ]
-            </button>
-            <button
-              type="button"
-              className={"opt" + (os === "android" ? " sel" : "")}
-              onClick={() => setOs("android")}
-            >
-              [ android ]
-            </button>
+        {platform === "whatsapp" && (
+          <div className="ln">
+            <div className="row">
+              <button
+                type="button"
+                className={"opt" + (os === "iphone" ? " sel" : "")}
+                onClick={() => setOs("iphone")}
+              >
+                [ iphone ]
+              </button>
+              <button
+                type="button"
+                className={"opt" + (os === "android" ? " sel" : "")}
+                onClick={() => setOs("android")}
+              >
+                [ android ]
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         <div className="ln" style={{ animationDelay: "80ms" }}>
           <div className="steps">
-            {STEPS[os].map((st, i) => (
+            {steps.map((st, i) => (
               <div key={i}>
                 {i + 1} · {st}
               </div>
