@@ -42,18 +42,22 @@ def _preprocess(job_id: str):
     is assembled this chains straight into the read (no identity pick, no manual
     send). `participants` is still computed for v2 (who's-who, deferred)."""
     try:
+        source = (jobs.get_status(job_id) or {}).get("source") or "whatsapp"
         exp = jobs.path(job_id, "export")
-        chat = ingest.find_chat(exp)
+        chat = ingest.find_export(exp, source)
         if not chat:
-            jobs.set_status(job_id, state="error", message="no chat .txt found in the upload"); return
-        msgs = ingest.parse(chat)
+            want = "result.json" if source == "telegram" else "_chat.txt"
+            jobs.set_status(job_id, state="error", message=f"no {want} found in the upload"); return
+        msgs, predecoded = ingest.parse_export(chat, source)
         if not msgs:
             jobs.set_status(job_id, state="error", message="couldn't read any messages from this export"); return
 
-        media = ingest.media_files(exp)
+        media = ingest.media_files(exp, source)
         # Iterative discovery decodes only audio up front (text-first); images are
         # decoded on demand during the read loop. Otherwise: cheap-all decode now.
         to_decode = [f for f in media if decode.file_type(f) == "audio"] if settings.iterative_discovery else media
+        # Drop anything already captioned without the VLM (Telegram .tgs emoji stickers).
+        to_decode = [f for f in to_decode if f.name not in predecoded]
         total = sum(1 for f in to_decode if decode.file_type(f) in _DECODABLE)
         # Iterative discovery is text-first: the up-front pass only transcribes voice
         # notes (images are opened on demand during the read). Present it as ONE
@@ -76,6 +80,7 @@ def _preprocess(job_id: str):
             jobs.set_status(job_id, progress={"done": done, "total": total, "pct": pct}, recent=recent)
 
         decoded = decode.decode_media(to_decode, jobs.path(job_id, "work"), on_progress)
+        decoded.update(predecoded)   # fold in the VLM-free captions (Telegram emoji stickers)
         jobs.path(job_id, "media.json").write_text(json.dumps(decoded, ensure_ascii=False, indent=2))
         jobs.path(job_id, "transcript.txt").write_text(T.assemble(msgs, decoded))
         # structured transcript, keyed by id — powers clickable [#id] receipts
@@ -103,7 +108,9 @@ def _image_files_for_ids(job_id: str, ids):
     files = []
     for nm in names:
         hits = list(jobs.path(job_id, "export").rglob(nm))
-        if hits and decode.file_type(hits[0]) in ("image", "sticker"):
+        # .tgs (Telegram animated stickers) carry no raster to deepen — they're
+        # already captioned from the message emoji, so never send them for a closer look.
+        if hits and decode.file_type(hits[0]) in ("image", "sticker") and hits[0].suffix.lower() != ".tgs":
             files.append(hits[0])
     return files
 

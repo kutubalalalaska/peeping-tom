@@ -54,8 +54,10 @@ RICH = {"people", "scene"}
 def file_type(p: Path) -> str:
     n, e = p.name.upper(), p.suffix.lower()
     if "AUDIO" in n or e in (".opus", ".m4a", ".mp3", ".wav", ".ogg"): return "audio"
-    if "VIDEO" in n or "GIF" in n or e in (".mp4", ".mov", ".3gp"): return "video"
-    if e == ".webp" or "STICKER" in n: return "sticker"
+    if "VIDEO" in n or "GIF" in n or e in (".mp4", ".mov", ".3gp", ".webm", ".gif"): return "video"
+    # .tgs = Telegram's gzipped-Lottie animated sticker (no raster the VLM can read);
+    # it's captioned from the message emoji upstream and skipped here.
+    if e in (".webp", ".tgs") or "STICKER" in n: return "sticker"
     if "PHOTO" in n or "IMAGE" in n or e in (".jpg", ".jpeg", ".png", ".heic", ".heif"): return "image"
     return "document"
 

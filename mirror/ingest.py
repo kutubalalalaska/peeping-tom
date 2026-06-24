@@ -1,10 +1,15 @@
-"""Ingest a WhatsApp export: unzip, find _chat.txt, parse into messages.
+"""Ingest a chat export: unzip, find the export file, parse into messages.
+
+Two sources, one output shape. WhatsApp ships a fragile `_chat.txt` we regex by
+line; Telegram Desktop ships a structured `result.json` (exact ts + sender +
+media paths) we read directly. Both produce the same list[Message], so decode,
+transcript assembly, the read, and clickable receipts are all source-agnostic.
 
 Each message gets a stable integer id (its position), used later as the [#id]
 citation handle the read points back to.
 """
 
-import re, zipfile
+import json, os, re, zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +56,23 @@ def find_chat(folder: Path):
     return next(folder.rglob("_chat.txt"), None) or next(folder.rglob("*.txt"), None)
 
 
+def find_export(folder: Path, source: str = "whatsapp"):
+    """Locate the export file for a source: Telegram's result.json, else the
+    WhatsApp _chat.txt."""
+    if source == "telegram":
+        return next(folder.rglob("result.json"), None)
+    return find_chat(folder)
+
+
+def parse_export(path: Path, source: str = "whatsapp"):
+    """Unified entry → (messages, predecoded). `predecoded` carries media records
+    we already know without the VLM — Telegram's animated-sticker emoji — keyed by
+    basename, ready to merge into the decode output. Empty for WhatsApp."""
+    if source == "telegram":
+        return _parse_telegram(path)
+    return parse(path), {}
+
+
 def parse(chat_path: Path):
     """Return list[Message]. Continuation lines fold into the previous message."""
     msgs = []
@@ -82,9 +104,71 @@ def parse(chat_path: Path):
     return msgs
 
 
-def media_files(folder: Path):
-    """All non-text files in the export (the raw media that stays local)."""
-    return [f for f in folder.rglob("*") if f.is_file() and f.suffix.lower() != ".txt"]
+# --- Telegram (Desktop result.json) ------------------------------------------
+
+def _tg_text(t) -> str:
+    """Flatten Telegram's `text`, which is a plain string OR a list mixing strings
+    and entity objects (links, mentions, bold…). We keep only the text; styling
+    carries little read value (JSON-only v1 decision)."""
+    if isinstance(t, str):
+        return t
+    if isinstance(t, list):
+        return "".join(seg if isinstance(seg, str) else seg.get("text", "")
+                       for seg in t if isinstance(seg, (str, dict)))
+    return ""
+
+
+def _norm_tg_ts(ts: str) -> str:
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return ts or ""
+
+
+def _parse_telegram(path: Path):
+    """Parse a Telegram Desktop JSON export into (messages, predecoded).
+
+    Only `type == "message"` rows become messages; service rows (joins, calls,
+    pins) are skipped, mirroring how WhatsApp system lines are dropped. The media
+    reference is `photo` (images) or `file` (voice/video/sticker/document); we
+    store its basename so decode/transcript key it the same way as WhatsApp. For
+    `.tgs` animated stickers the VLM can't read Lottie, so we caption them from
+    Telegram's `sticker_emoji` and hand that back as a predecoded record.
+    Replies/forwards are ignored in v1 (kept to the shared Message shape)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8", errors="ignore"))
+    msgs, predecoded = [], {}
+    for m in data.get("messages", []):
+        if m.get("type") != "message":
+            continue
+        sender = _clean(str(m.get("from") or ""))
+        if not sender:
+            continue  # author missing (rare in personal chats) — nothing to attribute
+        text = _clean(_tg_text(m.get("text")))
+        media = []
+        ref = m.get("photo") or m.get("file")
+        if ref:
+            base = os.path.basename(ref)
+            media.append(base)
+            if m.get("media_type") == "sticker" and base.lower().endswith(".tgs"):
+                emoji = (m.get("sticker_emoji") or "").strip()
+                predecoded[base] = {"type": "sticker", "tier": "emoji",
+                                    "caption": (f"animated sticker {emoji}".strip())}
+        msgs.append(Message(id=len(msgs), ts=_norm_tg_ts(m.get("date")),
+                            sender=sender, text=text, media=media))
+    return msgs, predecoded
+
+
+# Telegram export chrome that isn't chat media (JSON export is lean, but HTML
+# leftovers can ride along if a user exported both formats).
+_TG_SKIP_EXT = {".json", ".html", ".htm", ".css", ".js"}
+
+
+def media_files(folder: Path, source: str = "whatsapp"):
+    """All raw media files in the export (the bytes that stay local). Excludes the
+    export's own text/markup — _chat.txt for WhatsApp, result.json + HTML chrome
+    for Telegram."""
+    skip = _TG_SKIP_EXT if source == "telegram" else {".txt"}
+    return [f for f in folder.rglob("*") if f.is_file() and f.suffix.lower() not in skip]
 
 
 def participants(messages):

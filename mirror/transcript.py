@@ -10,13 +10,13 @@ import os
 def _attach_label(fname: str, media: dict) -> str:
     rec = media.get(fname) or media.get(os.path.basename(fname)) or {}
     u = fname.upper()
-    if "AUDIO" in u or u.endswith((".OPUS", ".M4A", ".MP3")):
+    if "AUDIO" in u or u.endswith((".OPUS", ".M4A", ".MP3", ".OGG", ".WAV")):
         t = rec.get("transcript")
         return f'[voice message: "{t}"]' if t else "[voice message]"
-    if u.endswith(".WEBP") or "STICKER" in u:
+    if u.endswith((".WEBP", ".TGS")) or "STICKER" in u:
         c = rec.get("caption")
         return f"[sticker: {c}]" if c else "[sticker]"
-    if "VIDEO" in u or "GIF" in u or u.endswith((".MP4", ".MOV")):
+    if "VIDEO" in u or "GIF" in u or u.endswith((".MP4", ".MOV", ".WEBM")):
         c = rec.get("caption") or "; ".join(rec.get("frame_captions", []))
         if rec.get("transcript"):
             c = (c + " | said: " + rec["transcript"]) if c else "said: " + rec["transcript"]
