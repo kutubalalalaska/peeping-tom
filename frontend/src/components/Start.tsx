@@ -22,9 +22,11 @@ const WA_STEPS: Record<OS, string[]> = {
   ],
 };
 
-// Telegram's machine-readable export is desktop-only (mobile can't produce it).
+// Telegram's machine-readable export is desktop-only (mobile can't produce it), and
+// only in the non-sandboxed builds — the regular mac/win app-store Telegram lacks it.
 const TG_STEPS: string[] = [
-  "open telegram on desktop (export isn’t on mobile).",
+  "get telegram desktop from desktop.telegram.org — or “telegram lite” on the app store.",
+  "(the regular app-store telegram can’t export — it has no export option.)",
   "open the chat → ⋮ → “export chat history”.",
   "set format to “machine-readable JSON”.",
   "tick photos, voice & video messages, and stickers.",
