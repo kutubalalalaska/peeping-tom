@@ -125,6 +125,19 @@ class Settings:
     ollama_host: str = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
     vision_model: str = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
     whisper_model: str = os.environ.get("WHISPER_MODEL", "base")
+    # Whisper quality levers. language: "" = auto-detect from the chat's TEXT once and apply to
+    # all clips (general, per-chat — fixes short-clip misdetect without assuming an audience);
+    # "auto" = Whisper's per-clip detection; or a code like "ru" to force. beam_size>1 = better
+    # accuracy (1 is greedy). (VAD + condition_on_previous_text=False are applied in code — they
+    # cut hallucination-on-silence and repetition loops, language-agnostic.)
+    whisper_language: str = os.environ.get("WHISPER_LANGUAGE", "")     # "" = detect-from-corpus
+    whisper_beam: int = int(os.environ.get("WHISPER_BEAM", "5"))
+    # Transcribe the AUDIO of video messages (round video notes) — many people use them as a
+    # primary channel, so their speech is high-signal. Round notes are always transcribed;
+    # larger shared clips only if under video_max_mb (avoid transcribing long movies). The
+    # visual frames are a separate, deep-pass concern; this is just the speech.
+    transcribe_video: bool = _b("TRANSCRIBE_VIDEO", "1")
+    video_max_mb: int = int(os.environ.get("VIDEO_MAX_MB", "25"))
     decode_workers: int = int(os.environ.get("DECODE_WORKERS", "8"))
     decode_max_px: int = int(os.environ.get("DECODE_MAX_PX", "1280"))          # cap longest side (deep pass)
     vision_num_predict: int = int(os.environ.get("VISION_NUM_PREDICT", "128"))  # cap caption length (tokens)

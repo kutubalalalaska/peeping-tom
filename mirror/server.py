@@ -71,18 +71,32 @@ def _preprocess(job_id: str):
                         participants=ingest.participants(msgs), recent=[],
                         progress={"done": 0, "total": total, "pct": 0 if total else 100})
 
+        decode_t0 = time.monotonic()
+
         def on_progress(done: int, total: int, item: dict):
             cur = jobs.get_status(job_id) or {}
             recent = cur.get("recent", [])
             if item and item.get("caption"):
                 recent = (recent + [item])[-12:]
             pct = int(done * 100 / total) if total else 100
-            jobs.set_status(job_id, progress={"done": done, "total": total, "pct": pct}, recent=recent)
+            # Live, self-correcting ETA for the (long-pole) transcription phase: once a few
+            # items finish, remaining ≈ elapsed/done × items_left.
+            eta = None
+            if done and total and done < total:
+                eta = round((time.monotonic() - decode_t0) / done * (total - done))
+            jobs.set_status(job_id, progress={"done": done, "total": total, "pct": pct},
+                            recent=recent, eta_seconds=eta, eta_phase="transcribing")
 
-        decoded = decode.decode_media(to_decode, jobs.path(job_id, "work"), on_progress)
+        # Transcription language (general, per-chat): explicit override / forced per-clip auto /
+        # else detect from the chat's own TEXT and apply to all clips (no audience assumption).
+        wl = settings.whisper_language.strip().lower()
+        lang = wl if (wl and wl != "auto") else (None if wl == "auto"
+                                                 else decode.detect_language(" ".join(m.text for m in msgs if m.text)))
+        print(f"[decode] transcription language: {lang or 'auto (per-clip)'}", flush=True)
+        decoded = decode.decode_media(to_decode, jobs.path(job_id, "work"), on_progress, language=lang)
         decoded.update(predecoded)   # fold in the VLM-free captions (Telegram emoji stickers)
         jobs.path(job_id, "media.json").write_text(json.dumps(decoded, ensure_ascii=False, indent=2))
-        jobs.path(job_id, "transcript.txt").write_text(T.assemble(msgs, decoded))
+        jobs.path(job_id, "transcript.txt").write_text(T.assemble_for_read(msgs, decoded))
         # structured transcript, keyed by id — powers clickable [#id] receipts
         jobs.path(job_id, "messages.json").write_text(json.dumps(
             [{"id": m.id, "ts": m.ts, "sender": m.sender, "text": m.text, "media": m.media} for m in msgs],
@@ -103,10 +117,17 @@ def _image_files_for_ids(job_id: str, ids):
     mp = jobs.path(job_id, "messages.json")
     if not mp.exists():
         return []
+    medp = jobs.path(job_id, "media.json")
+    media = json.loads(medp.read_text()) if medp.exists() else {}
     want = set(ids)
     names = [fn for m in json.loads(mp.read_text()) if m.get("id") in want for fn in (m.get("media") or [])]
     files = []
     for nm in names:
+        # Never deep-caption an explicit image: the DETAILED prompt would generate the
+        # graphic description the neutral marker exists to keep off the boundary.
+        rec = media.get(nm) or media.get(Path(nm).name) or {}
+        if rec.get("explicit"):
+            continue
         hits = list(jobs.path(job_id, "export").rglob(nm))
         # .tgs (Telegram animated stickers) carry no raster to deepen — they're
         # already captioned from the message emoji, so never send them for a closer look.

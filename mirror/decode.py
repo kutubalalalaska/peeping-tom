@@ -187,10 +187,55 @@ def _timing_summary(out: dict, wall_ms: float, model: str, max_px: int):
           f"workers={settings.decode_workers} max_px={max_px}", flush=True)
 
 
-def decode_media(files, work: Path, on_progress=None) -> dict:
+def detect_language(text: str):
+    """Best-effort dominant language (ISO 639-1, e.g. 'ru') of the chat from its TEXT —
+    the strongest, cheapest signal (thousands of messages), and language-GENERAL (no
+    audience assumption). Returns a 2-letter code or None → caller falls back to Whisper's
+    per-clip auto-detect. Local, no network. Degrades gracefully if langdetect is absent."""
+    sample = (text or "").strip()
+    if len(sample) < 200:                              # too little text to be confident
+        return None
+    try:
+        from langdetect import detect, DetectorFactory
+        DetectorFactory.seed = 0                       # deterministic
+        code = detect(sample[:50000])
+        return code.split("-")[0] if code else None    # 'zh-cn' -> 'zh'
+    except Exception:
+        return None
+
+
+def _transcribe(f: Path, work: Path, wm, language: str = None) -> str:
+    """Whisper-transcribe the audio of a voice note OR a video message (we strip VIDEO with
+    -vn and keep the audio track). Returns "" if there's no usable audio. Quality params:
+    `language` forces the language (skips the flaky per-clip auto-detect; None = auto),
+    vad_filter trims silence (cuts hallucination), condition_on_previous_text=False stops
+    repetition loops, beam_size from config."""
+    wav = work / (f.stem + ".wav")
+    subprocess.run(["ffmpeg", "-y", "-i", str(f), "-vn", "-ar", "16000", "-ac", "1", str(wav)],
+                   capture_output=True)
+    try:
+        if not wav.exists() or wav.stat().st_size < 1000:   # no / empty audio track
+            return ""
+        seg, _ = wm.transcribe(str(wav), language=language or None, beam_size=settings.whisper_beam,
+                               vad_filter=True, condition_on_previous_text=False)
+        return " ".join(s.text.strip() for s in seg).strip()
+    finally:
+        wav.unlink(missing_ok=True)
+
+
+def _is_video_note(f: Path) -> bool:
+    """A round video MESSAGE (Telegram stores these under round_video_messages/), as
+    opposed to a shared video clip — always worth transcribing, regardless of size."""
+    return "round_video" in str(f).lower() or "video_message" in str(f).lower()
+
+
+def decode_media(files, work: Path, on_progress=None, language: str = None) -> dict:
     """CHEAP-ALL pass. files: list[Path]. Returns {filename: record}. After each
     decoded item calls on_progress(done, total, item={file,type,caption|None}).
-    Images/stickers/video use the small VISION_MODEL_FAST at decode_max_px_fast."""
+    Images/stickers/video use the small VISION_MODEL_FAST at decode_max_px_fast.
+    Voice notes AND video messages are Whisper-transcribed (their speech is data);
+    video keyframes (the visual) are captioned only in cheap-all mode, not at scale.
+    `language` (ISO code or None) is passed to Whisper for all speech (None = auto)."""
     work.mkdir(parents=True, exist_ok=True)
     wall0 = time.monotonic()
     fast_model = settings.vision_model_fast or settings.vision_model
@@ -223,45 +268,57 @@ def decode_media(files, work: Path, on_progress=None) -> dict:
                 name, rec = f.name, {"type": "sticker" if k == "sticker" else "image", "error": str(e)}
             step(name, rec)
 
-    # audio
-    if by.get("audio"):
-        if settings.vision_backend == "mock":
-            for f in by["audio"]:
-                step(f.name, {"type": "audio", "transcript": f"[mock transcript {f.stem[-6:]}]"})
-        else:
+    # speech: voice notes + video messages share one Whisper load.
+    audio_files = list(by.get("audio", []))
+    video_files = list(by.get("video", []))
+    if settings.vision_backend == "mock":
+        for f in audio_files:
+            step(f.name, {"type": "audio", "transcript": f"[mock transcript {f.stem[-6:]}]"})
+    else:
+        wm = None
+        if audio_files or (video_files and settings.transcribe_video):
             try:
                 from faster_whisper import WhisperModel
                 wm = WhisperModel(settings.whisper_model, device="cpu", compute_type="int8")
             except Exception as e:
-                wm = None
-                for f in by["audio"]:
+                for f in audio_files:
                     step(f.name, {"type": "audio", "error": f"voice-note decode unavailable: {e}"})
-            if wm:
-                for f in by["audio"]:
-                    try:
-                        wav = work / (f.stem + ".wav")
-                        subprocess.run(["ffmpeg", "-y", "-i", str(f), "-ar", "16000", "-ac", "1", str(wav)],
-                                       capture_output=True)
-                        seg, _ = wm.transcribe(str(wav), beam_size=1)
-                        rec = {"type": "audio", "transcript": " ".join(s.text.strip() for s in seg).strip()}
-                        wav.unlink(missing_ok=True)
-                    except Exception as e:
-                        rec = {"type": "audio", "error": str(e)}
-                    step(f.name, rec)
+        for f in audio_files:
+            if wm is None:
+                break                                # already error-stepped above
+            try:
+                rec = {"type": "audio", "transcript": _transcribe(f, work, wm, language)}
+            except Exception as e:
+                rec = {"type": "audio", "error": str(e)}
+            step(f.name, rec)
 
-    # video (keyframes on the small model)
-    for f in by.get("video", []):
+    # video: transcribe the SPEECH (talking video messages), + keyframe the visual only in
+    # cheap-all mode (skipped at scale — iterative mode leaves frames to the deep pass).
+    for f in video_files:
         rec = {"type": "video"}
-        frames = _keyframes(f, work)
-        try:
-            caps = []
-            for fr in frames:
-                view, _ = (_prep_image(fr, work, fast_px) if settings.vision_backend != "mock" else (fr, 0.0))
-                c, _ = _vlm(view, FRAME, num_predict=48, model=fast_model)
-                caps.append(c)
-            rec["frame_captions"] = caps
-        except Exception as e:
-            rec["error"] = str(e)
+        if settings.vision_backend == "mock":
+            if settings.transcribe_video:
+                rec["transcript"] = f"[mock video speech {f.stem[-6:]}]"
+        else:
+            if settings.transcribe_video and wm is not None:
+                if _is_video_note(f) or f.stat().st_size <= settings.video_max_mb * 1_000_000:
+                    try:
+                        tx = _transcribe(f, work, wm, language)
+                        if tx:
+                            rec["transcript"] = tx
+                    except Exception as e:
+                        rec["error"] = str(e)
+            if not settings.iterative_discovery:     # visual frames only for small (cheap-all) chats
+                try:
+                    caps = []
+                    for fr in _keyframes(f, work):
+                        view, _ = _prep_image(fr, work, fast_px)
+                        c, _ = _vlm(view, FRAME, num_predict=48, model=fast_model)
+                        caps.append(c)
+                    if caps:
+                        rec["frame_captions"] = caps
+                except Exception as e:
+                    rec.setdefault("error", str(e))
         step(f.name, rec)
 
     for f in by.get("document", []):
