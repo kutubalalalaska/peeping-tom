@@ -16,14 +16,14 @@ API:
 Frontend: serves the built React SPA from WEB_DIR if present, else placeholder pages.
 """
 
-import json, time
+import json, threading, time, uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, decode, transcript as T, frontier, jobs
+from . import ingest, decode, transcript as T, frontier, jobs, budget
 from .config import settings
 
 HERE = Path(__file__).parent
@@ -133,11 +133,9 @@ def _read(job_id: str):
                 recent = (recent + [item])[-12:]
             jobs.set_status(job_id, recent=recent)
 
-        def stream_read(src_text: str, select_k: int):
-            """Run one streamed read. Resets the live channels, then pushes throttled
-            token updates — the model's process into status.partial_thinking (real
-            reasoning if streamed, else the NOTE working-lines) and the analysis into
-            status.partial_read. Returns (read_body, picks)."""
+        def mk_on_delta():
+            """A fresh throttled stream sink → status.partial_read / partial_thinking
+            (read body vs the model's live process). Resets both channels first."""
             jobs.set_status(job_id, partial_read="", partial_thinking="")
             ch = {"read": {"len": 0, "t": 0.0}, "thinking": {"len": 0, "t": 0.0}}
 
@@ -148,57 +146,112 @@ def _read(job_id: str):
                 if len(text_so_far) > s["len"] and (s["len"] == 0 or now - s["t"] >= 0.2):
                     s["len"], s["t"] = len(text_so_far), now
                     jobs.set_status(job_id, **{field: text_so_far})
+            return on_delta
 
-            raw = frontier.read(src_text, me, route, select_k=select_k, on_delta=on_delta)
+        def stream_read(src_text: str, select_k: int):
+            """One streamed one-shot read → (read_body, picks). INSPECT/NOTE handled."""
+            raw = frontier.read(src_text, me, route, select_k=select_k, on_delta=mk_on_delta())
             notes, body, picks = frontier.split_stream_read(raw)
-            # final clean flush: the read body always; thinking only if NOTE-derived
-            # (don't clobber a streamed reasoning trace with an empty notes string).
             flush = {"partial_read": body}
-            if notes:
+            if notes:                                # don't clobber a streamed reasoning trace
                 flush["partial_thinking"] = notes
             jobs.set_status(job_id, **flush)
             return body, picks
 
-        rounds = settings.max_inspect_rounds if settings.iterative_discovery else 1
-        max_imgs = settings.max_inspect_images if settings.iterative_discovery else settings.deep_select_k
-        batch = settings.deep_select_k
-        text = jobs.path(job_id, "transcript.txt").read_text()
+        # Decide the read strategy (SCALING.md size gate): one-shot, or — for a corpus
+        # too big for the context window — chronological MAP-REDUCE.
+        msgs_all = [ingest.Message(**m) for m in json.loads(jobs.path(job_id, "messages.json").read_text())]
+        media_all = (json.loads(jobs.path(job_id, "media.json").read_text())
+                     if jobs.path(job_id, "media.json").exists() else {})
+        plan = budget.plan(msgs_all, media_all)
         jobs.set_status(job_id, state="analyzing", route=route.id, model=route.model,
                         partial_read="", partial_thinking="",
+                        plan={"tier": plan["tier"], "chunks": len(plan["chunks"]), "form": plan["form"],
+                              "est_tokens": plan["est_compact"], "script": plan["script"]},
                         message="the frontier model is reading your chat…")
 
-        seen, inspected, first_read, final, last_added = set(), [], None, None, False
-        for _ in range(rounds):
-            rem = max_imgs - len(seen)
-            rd, picks = stream_read(text, select_k=min(batch, rem) if rem > 0 else 0)
-            if first_read is None:
-                first_read = rd
-            final, last_added = rd, False
-            picks = [i for i in dict.fromkeys(picks) if i not in seen][:rem]
-            files = _image_files_for_ids(job_id, picks) if picks else []
-            if not files:
-                break                                # the model is satisfied (or nothing to fetch)
-            jobs.set_status(job_id, message=f"opening {len(files)} image(s) the read flagged…")
-            deep = decode.decode_deep(files, jobs.path(job_id, "work"), on_progress=glimpse)
-            media = json.loads(jobs.path(job_id, "media.json").read_text())
-            for name, rec in deep.items():
-                media.setdefault(name, {}).update(rec)
-            jobs.path(job_id, "media.json").write_text(json.dumps(media, ensure_ascii=False, indent=2))
-            msgs = [ingest.Message(**m) for m in json.loads(jobs.path(job_id, "messages.json").read_text())]
-            text = T.assemble(msgs, media)
-            jobs.path(job_id, "transcript.txt").write_text(text)
-            seen.update(picks)
-            inspected += [n for n, rc in deep.items() if rc.get("caption")]
-            last_added = True
-            if len(seen) >= max_imgs:
-                break
-        if last_added:                               # re-read once on the freshly-enriched transcript
-            jobs.set_status(job_id, message="re-reading with the photos in view…")
-            final, _ = stream_read(text, select_k=0)
+        inspected, first_read, final = [], None, None
+        if plan["tier"] >= 3:
+            # MAP-REDUCE (SCALING.md Stage 3): read chronological slices, then synthesise.
+            # Stage 4: each era may deepen a few of ITS OWN images (budget distributed
+            # across eras, not one flat global cap) — only in iterative mode, where images
+            # arrive as placeholders the era can INSPECT.
+            n = len(plan["chunks"])
+            jobs.set_status(job_id, message=f"this chat is large — reading it in {n} chronological passes…")
+            eras = []
+            read_t0 = time.monotonic()
+            for idx, (s, e) in enumerate(plan["chunks"]):
+                span = f"{(msgs_all[s].ts or '')[:10]} → {(msgs_all[e - 1].ts or '')[:10]}"
+                # Live read-phase ETA: avg time per finished era × eras left (+1 ≈ the synthesis).
+                eta = round((time.monotonic() - read_t0) / idx * (n - idx + 1)) if idx else None
+                jobs.set_status(job_id, partial_thinking=f"reading era {idx + 1}/{n}  ({span})…",
+                                eta_seconds=eta, eta_phase="reading")
+                era_msgs = msgs_all[s:e]
+                slice_text, _ = T.assemble_compact(era_msgs, media_all)
+                k = (min(settings.images_per_era, settings.max_inspect_images_total - len(inspected))
+                     if settings.iterative_discovery else 0)
+                era_text, picks = frontier.read_era(slice_text, route, idx + 1, n, select_k=max(0, k))
+                files = _image_files_for_ids(job_id, picks) if picks else []
+                if files:                                # deepen this era's flagged images, then re-read it
+                    jobs.set_status(job_id, message=f"era {idx + 1}/{n}: opening {len(files)} image(s) the read flagged…")
+                    deep = decode.decode_deep(files, jobs.path(job_id, "work"), on_progress=glimpse)
+                    for name, rec in deep.items():
+                        media_all.setdefault(name, {}).update(rec)
+                    jobs.path(job_id, "media.json").write_text(json.dumps(media_all, ensure_ascii=False, indent=2))
+                    inspected += [nm for nm, rc in deep.items() if rc.get("caption")]
+                    slice_text, _ = T.assemble_compact(era_msgs, media_all)
+                    era_text, _ = frontier.read_era(slice_text, route, idx + 1, n, select_k=0)
+                eras.append((span, era_text))
+                jobs.set_status(job_id, partial_read="\n\n".join(
+                    f"[era {i + 1}/{n} · {lab}]\n{t}" for i, (lab, t) in enumerate(eras)))
+            # the deepened captions changed the transcript — persist what actually crossed
+            jobs.path(job_id, "transcript.txt").write_text(T.assemble_for_read(msgs_all, media_all))
+            jobs.set_status(job_id, message=f"synthesising the arc across {n} eras…")
+            final = frontier.synthesize(eras, route, on_delta=mk_on_delta())
+            jobs.set_status(job_id, partial_read=final)
+            first_read = final
+        else:
+            # ONE-SHOT (+ optional iterative image deepening) — the existing path.
+            rounds = settings.max_inspect_rounds if settings.iterative_discovery else 1
+            max_imgs = settings.max_inspect_images if settings.iterative_discovery else settings.deep_select_k
+            batch = settings.deep_select_k
+            text = jobs.path(job_id, "transcript.txt").read_text()
+            seen, last_added = set(), False
+            for _ in range(rounds):
+                rem = max_imgs - len(seen)
+                rd, picks = stream_read(text, select_k=min(batch, rem) if rem > 0 else 0)
+                if first_read is None:
+                    first_read = rd
+                final, last_added = rd, False
+                picks = [i for i in dict.fromkeys(picks) if i not in seen][:rem]
+                files = _image_files_for_ids(job_id, picks) if picks else []
+                if not files:
+                    break                            # the model is satisfied (or nothing to fetch)
+                jobs.set_status(job_id, message=f"opening {len(files)} image(s) the read flagged…")
+                deep = decode.decode_deep(files, jobs.path(job_id, "work"), on_progress=glimpse)
+                media = json.loads(jobs.path(job_id, "media.json").read_text())
+                for name, rec in deep.items():
+                    media.setdefault(name, {}).update(rec)
+                jobs.path(job_id, "media.json").write_text(json.dumps(media, ensure_ascii=False, indent=2))
+                msgs = [ingest.Message(**m) for m in json.loads(jobs.path(job_id, "messages.json").read_text())]
+                text = T.assemble_for_read(msgs, media)
+                jobs.path(job_id, "transcript.txt").write_text(text)
+                seen.update(picks)
+                inspected += [nm for nm, rc in deep.items() if rc.get("caption")]
+                last_added = True
+                if len(seen) >= max_imgs:
+                    break
+            if last_added:                           # re-read once on the freshly-enriched transcript
+                jobs.set_status(job_id, message="re-reading with the photos in view…")
+                final, _ = stream_read(text, select_k=0)
 
+        # Self-destruct: the read is now READY, so start its TTL countdown here (not
+        # at upload) — the result page counts down to this `expires_at`, after which
+        # the sweeper deletes the whole job. Only on the hosted tier.
+        expires_at = (time.time() + settings.read_ttl_seconds) if settings.hosted else None
         jobs.path(job_id, "read.json").write_text(json.dumps(
             {"me": me, "read": final, "citations": frontier.citations(final),
-             "route": route.id, "model": route.model,
+             "route": route.id, "model": route.model, "expires_at": expires_at,
              "first_read": first_read, "inspected": inspected, "deep_count": len(inspected)},
             ensure_ascii=False, indent=2))
         deletion = None

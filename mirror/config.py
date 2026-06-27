@@ -134,6 +134,45 @@ class Settings:
     vision_model_fast: str = os.environ.get("VISION_MODEL_FAST", "")          # small VLM for the cheap-all pass (e.g. qwen2.5vl:3b); blank = same as vision_model
     decode_max_px_fast: int = int(os.environ.get("DECODE_MAX_PX_FAST", "768")) # smaller cap for the cheap-all pass
     deep_select_k: int = int(os.environ.get("DEEP_SELECT_K", "12"))            # per-round image-pick cap (also the single-round cap)
+    # --- explicit content (adult/legal): detect LOCALLY, carry a neutral marker ---
+    # When an image is flagged explicit (nudity/sexual content), the transcript carries
+    # a neutral marker instead of a graphic caption — so nothing intimate crosses the
+    # privacy boundary. The raw image stays local (receipts unaffected). The *fact* of
+    # an intimate image at a charged moment is the behavioural signal the read needs (a
+    # non-verbal act), not the anatomy — so the read loses nothing it can use. Detection
+    # rides the existing blind VLM classification (a dedicated local NSFW classifier is
+    # the planned hardening). NOTE: this is the ADULT/LEGAL case only — CSAM is a
+    # separate, deferred concern and this flag does NOT attempt to detect it.
+    mark_explicit: bool = _b("MARK_EXPLICIT", "1")            # on by default
+    explicit_marker: str = os.environ.get("EXPLICIT_MARKER", "intimate/explicit image")
+    # The explicit gate is a DEDICATED local NSFW detector (NudeNet) that runs BEFORE
+    # captioning — the VLM's self-report can't be trusted (it captions nudes but answers
+    # EXPLICIT=no). nsfw_threshold: detector score to count as exposed (lower = stricter,
+    # biased for recall). nsfw_required: if the detector can't load, fail CLOSED (skip all
+    # captions) instead of degrading to the unreliable VLM flag — set on the hosted exhibit.
+    nsfw_threshold: float = float(os.environ.get("NSFW_THRESHOLD", "0.5"))
+    nsfw_required: bool = _b("NSFW_REQUIRED")
+    # --- scaling: lossless transcript compression (SCALING.md Stage 2) ---
+    # Day-grouped dates + short sender tokens (legend in-band) → ~30-40% fewer tokens,
+    # #ids preserved. Off by default (existing one-shot behaviour unchanged); turn on
+    # for large corpora / the big-chat path. The size gate (below) also auto-uses it.
+    compact_transcript: bool = _b("COMPACT_TRANSCRIPT")
+
+    # --- scaling: the size gate (SCALING.md Stage 1) ---
+    # When the (language-aware) token estimate exceeds the usable window, the read is
+    # done as a chronological MAP-REDUCE instead of one-shot. read_context_tokens is the
+    # model's window; default 1M (GLM-5.2). Lower it to force/ test chunking. The reserve
+    # holds back room for the system prompt + wrapper + output.
+    read_context_tokens: int = int(os.environ.get("READ_CONTEXT_TOKENS", "1000000"))
+    read_reserve_tokens: int = int(os.environ.get("READ_RESERVE_TOKENS", "8000"))
+    read_safety: float = float(os.environ.get("READ_SAFETY", "0.9"))   # margin on usable (token est is approximate)
+    chunk_fill: float = float(os.environ.get("CHUNK_FILL", "0.6"))     # fraction of usable per map-reduce chunk
+    # Per-era image deepening (SCALING.md Stage 4): in map-reduce + iterative mode each era
+    # may INSPECT up to images_per_era of its own images (effort follows signal, distributed
+    # across eras instead of one flat global cap), bounded overall by max_inspect_images_total.
+    images_per_era: int = int(os.environ.get("IMAGES_PER_ERA", "6"))
+    max_inspect_images_total: int = int(os.environ.get("MAX_INSPECT_IMAGES_TOTAL", "64"))
+
     # --- iterative discovery: text+audio first, then the frontier requests images in capped rounds ---
     iterative_discovery: bool = _b("ITERATIVE_DISCOVERY")                     # off = cheap-all up front (1 round); on = text-first, multi-round
     max_inspect_rounds: int = int(os.environ.get("MAX_INSPECT_ROUNDS", "3"))  # cap on frontier image-request rounds

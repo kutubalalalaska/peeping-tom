@@ -33,9 +33,22 @@ services:
       ITERATIVE_DISCOVERY: "1"                          # text+audio first; GLM requests images in capped rounds (no cheap-all)
       WHISPER_MODEL: base
       EPHEMERAL: "0"                                    # keep artifacts so we can inspect the test
+      MAX_JOB_AGE_SECONDS: "86400"                      # 24h — keep the self-destruct sweeper from killing a long (multi-hour) in-flight run
+      PURGE_INTERVAL_SECONDS: "3600"                    # quieter sweeps during the test
+      IMAGES_PER_ERA: "6"                               # map-reduce Stage 4: per-era image deepening budget
+      # Cap era size to ~140k tokens (down from the 1M default). The 1M ceiling made
+      # ~4 eras of ~600k tokens, which forced OpenRouter to route GLM-5.2 onto the few
+      # ≥600k-context providers — several fp4 / low-uptime → flaky (finish=error, non-JSON
+      # bodies). At 256k the eras are ~140k tokens (~14 eras) and ~24 of 25 providers become
+      # eligible, so routing lands on reliable fp8/high-uptime endpoints. Cost-neutral.
+      READ_CONTEXT_TOKENS: "262144"
+      # (To force tier-3 on a SMALL chat for a quick UI test, instead use
+      # READ_CONTEXT_TOKENS=700 / READ_RESERVE_TOKENS=50 / READ_SAFETY=1.0 / CHUNK_FILL=0.5.)
       DATA_DIR: /data
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    cap_add:
+      - SYS_PTRACE          # lets py-spy attach to the uvicorn process for live profiling/hang dumps (dev only)
     volumes:
       - mirror-data:/data
     ports:
