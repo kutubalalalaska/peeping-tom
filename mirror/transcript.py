@@ -32,6 +32,10 @@ def _attach_label(fname: str, media: dict) -> str:
             c = (c + " | said: " + rec["transcript"]) if c else "said: " + rec["transcript"]
         return f"[video: {c}]" if c else "[video]"
     if "PHOTO" in u or "IMAGE" in u or u.endswith((".JPG", ".JPEG", ".PNG", ".HEIC")):
+        if rec.get("explicit"):
+            # Neutral marker only — the graphic caption is never produced/stored, so
+            # nothing intimate crosses the boundary. The fact of the image is the signal.
+            return f"[{rec.get('marker') or 'intimate/explicit image'}]"
         c = rec.get("caption") or rec.get("tag")
         who = rec.get("people_named")
         label = f"image of {', '.join(who)}" if who else "image"

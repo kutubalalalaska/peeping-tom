@@ -35,17 +35,33 @@ except Exception:
     pass
 
 # One pass: classify + caption. CAPTION length scales with content via the prompt.
+# EXPLICIT is a yes/no classification (a much lighter ask than a graphic description,
+# so the VLM complies far more readily) — when it's yes we DROP the caption and carry
+# a neutral marker instead (see _decode_image), so nothing intimate crosses the boundary.
 COMBINED = (
     "Describe this single chat image. Output exactly these two lines and nothing else:\n"
-    "CATEGORY=<people|scene|screenshot|document|diagram|meme|other>; PEOPLE=<yes|no>\n"
+    "CATEGORY=<people|scene|screenshot|document|diagram|meme|other>; PEOPLE=<yes|no>; EXPLICIT=<yes|no>\n"
     "CAPTION=<text>\n"
-    "Rules: PEOPLE=yes only if real human faces are visible. If CATEGORY is people or "
+    "Rules: PEOPLE=yes only if real human faces are visible. EXPLICIT=yes if the image "
+    "contains nudity or sexual content, otherwise EXPLICIT=no. If CATEGORY is people or "
     "scene, CAPTION is 1-2 precise lines (what/who is shown, setting, visible text, mood); "
     "otherwise CAPTION is at most 8 words. Only what is visible — never guess identities."
 )
 # Deep pass: a rich description regardless of category (the read asked to see it).
 DETAILED = ("Describe this chat image in 2-4 precise lines: what/who is shown, the setting, any "
             "visible text, the mood, and anything notable. Only what is visible — do not guess identities.")
+# Deep pass, SELF-GUARDED: the rich description PLUS an explicit classification in one
+# call, so the deep pass can drop an explicit image to the neutral marker on its own —
+# the cheap-all EXPLICIT flag doesn't exist in iterative-discovery mode (images aren't
+# cheap-all decoded), so the deep pass must not rely on it. EXPLICIT first (cheap to
+# answer); CAPTION is discarded in code when EXPLICIT=yes (never produced for storage).
+DEEP_GUARDED = (
+    "Describe this single chat image. Output exactly these two lines and nothing else:\n"
+    "EXPLICIT=<yes|no>\n"
+    "CAPTION=<text>\n"
+    "Rules: EXPLICIT=yes if the image contains nudity or sexual content, otherwise no. "
+    "CAPTION is 2-4 precise lines: what/who is shown, the setting, any visible text, the mood, "
+    "and anything notable. Only what is visible — do not guess identities.")
 STICKER = "WhatsApp sticker. One short line: what it depicts and the emotion it conveys (stickers stand in for words)."
 FRAME = "Frame from a short video in a chat. One line: what it shows."
 RICH = {"people", "scene"}
@@ -69,11 +85,12 @@ def _vlm(img: Path, prompt: str, num_predict: int = None, model: str = None):
     if settings.vision_backend == "mock":
         import hashlib
         h = int(hashlib.md5(img.name.encode()).hexdigest(), 16)
-        if "CATEGORY=" in prompt:                      # combined classify+caption
+        if "EXPLICIT=" in prompt:                      # combined classify+caption (cheap-all or deep-guard)
             people = "yes" if ("PHOTO" in img.name.upper() and h % 2 == 0) else "no"
             cat = "people" if people == "yes" else ("screenshot" if h % 3 else "document")
+            explicit = "yes" if (people == "yes" and h % 5 == 0) else "no"   # exercise the marker path
             cap = f"[mock caption {img.stem[-6:]}]" if (cat in RICH or people == "yes") else f"mock {cat}"
-            return f"CATEGORY={cat}; PEOPLE={people}\nCAPTION={cap}", (time.monotonic() - t0) * 1000
+            return f"CATEGORY={cat}; PEOPLE={people}; EXPLICIT={explicit}\nCAPTION={cap}", (time.monotonic() - t0) * 1000
         return f"[mock caption {img.stem[-6:]}]", (time.monotonic() - t0) * 1000
 
     b64 = base64.b64encode(img.read_bytes()).decode()
@@ -135,17 +152,82 @@ def _keyframes(src: Path, out_dir: Path, n=2):
     return frames
 
 
+# A VLM that balks at an image returns a refusal instead of a caption ("I can't
+# describe this…"). We never want that string to leak into the transcript as a
+# "caption", so we detect it and fall back to a bare [image] label (see _decode_image).
+_REFUSAL_RE = re.compile(
+    r"\b(i\s*(can'?t|cannot|won'?t|am unable|'m unable|am not able)|i'?m sorry|"
+    r"unable to (process|describe|assist|help)|cannot (assist|help|comply)|"
+    r"against my (guidelines|policy)|i (will|must) not)\b", re.I)
+
+
+def _is_refusal(caption: str) -> bool:
+    return bool(caption) and bool(_REFUSAL_RE.search(caption))
+
+
 def _parse_combined(s: str):
-    """Pull CATEGORY / PEOPLE / CAPTION out of the single-pass response."""
+    """Pull CATEGORY / PEOPLE / EXPLICIT / CAPTION out of the single-pass response."""
     cat = re.search(r"CATEGORY\s*=\s*(\w+)", s, re.I)
     ppl = re.search(r"PEOPLE\s*=\s*(yes|no)", s, re.I)
+    exp = re.search(r"EXPLICIT\s*=\s*(yes|no)", s, re.I)
     cap = re.search(r"CAPTION\s*=\s*(.+)", s, re.I | re.S)
     category = cat.group(1).lower() if cat else "other"
     people = bool(ppl and ppl.group(1).lower() == "yes")
+    explicit = bool(exp and exp.group(1).lower() == "yes")
     caption = cap.group(1).strip() if cap else ""
     if not caption:                                     # model ignored the format
-        caption = re.sub(r"CATEGORY.*|PEOPLE.*", "", s, flags=re.I).strip() or s.strip()
-    return category, people, caption
+        caption = re.sub(r"CATEGORY.*|PEOPLE.*|EXPLICIT.*", "", s, flags=re.I).strip() or s.strip()
+    return category, people, explicit, caption
+
+
+# --- explicit-image gate: a DEDICATED local NSFW detector (NudeNet), run BEFORE captioning.
+# The captioning VLM can NOT be trusted to self-report (it writes the graphic caption but
+# answers EXPLICIT=no — proven on real nudes), so the marker hangs on THIS, not the VLM.
+# onnxruntime (already a faster-whisper dep) backs NudeNet; the model is pre-baked in the image.
+_NUDE = None
+_NUDE_TRIED = False
+
+
+def _nude():
+    """Lazy-load the NudeNet detector once. None if it can't load (logged loudly)."""
+    global _NUDE, _NUDE_TRIED
+    if not _NUDE_TRIED:
+        _NUDE_TRIED = True
+        try:
+            from nudenet import NudeDetector
+            _NUDE = NudeDetector()
+        except Exception as e:
+            print(f"[nsfw] NudeNet unavailable ({e}) — explicit gate degraded "
+                  f"(nsfw_required={settings.nsfw_required})", flush=True)
+            _NUDE = None
+    return _NUDE
+
+
+def _is_exposed(cls: str) -> bool:
+    """True for NudeNet classes meaning actual exposed nudity — not shirtless men, not the
+    'COVERED' variants. Substring-matched so minor class-name changes don't silently slip."""
+    c = (cls or "").upper()
+    if "EXPOSED" not in c or c.startswith("MALE_BREAST"):
+        return False
+    return any(k in c for k in ("GENITALIA", "ANUS", "BUTTOCK", "BREAST"))
+
+
+def is_explicit_image(path: Path) -> bool:
+    """Does this image contain exposed nudity? Dedicated detector, biased for recall.
+    Mock backend → always False (no real pixels). Detector missing / error → respect
+    nsfw_required (fail-closed → True so the caption is skipped; fail-open → False)."""
+    if settings.vision_backend == "mock":
+        return False
+    det = _nude()
+    if det is None:
+        return settings.nsfw_required
+    try:
+        res = det.detect(str(path))
+        return any(_is_exposed(d.get("class", "")) and d.get("score", 0) >= settings.nsfw_threshold
+                   for d in res)
+    except Exception as e:
+        print(f"[nsfw] detect error on {path}: {e}", flush=True)
+        return settings.nsfw_required
 
 
 def _decode_image(f: Path, kind: str, work: Path, model: str = None, max_px: int = None):
@@ -154,10 +236,25 @@ def _decode_image(f: Path, kind: str, work: Path, model: str = None, max_px: int
         cap, ms = _vlm(view, STICKER, num_predict=48, model=model)
         return f.name, {"type": "sticker", "caption": cap,
                         "_t": {"resize_ms": resize_ms, "infer_ms": ms, "calls": 1}}
+    # NSFW GATE FIRST (dedicated detector, not the VLM's word): if flagged, carry the
+    # neutral marker and SKIP the caption call entirely — the graphic description is never
+    # generated. NOTE: adult/legal case only — this does not attempt CSAM.
+    if settings.mark_explicit and is_explicit_image(view):
+        return f.name, {"type": "image", "explicit": True, "marker": settings.explicit_marker,
+                        "tier": "explicit",
+                        "_t": {"resize_ms": resize_ms, "infer_ms": 0, "calls": 0}}
     text, ms = _vlm(view, COMBINED, num_predict=settings.vision_num_predict, model=model)
-    cat, people, caption = _parse_combined(text)
+    cat, people, explicit, caption = _parse_combined(text)
     rec = {"type": "image", "category": cat, "people": people}
-    if cat in RICH or people:
+    if settings.mark_explicit and explicit:
+        # VLM self-report as a SECONDARY backup to the detector above (either → marker).
+        # The caption is discarded here in CODE, never stored.
+        rec.update(explicit=True, marker=settings.explicit_marker, tier="explicit")
+    elif _is_refusal(caption):
+        # The VLM balked — don't leak its refusal string as a "caption". We can't
+        # assert the image is explicit, so we don't mark it; just a bare [image].
+        rec["tier"] = "tag"
+    elif cat in RICH or people:
         rec["caption"], rec["tier"] = caption, "detailed"
     else:
         rec["tag"], rec["tier"] = caption, "tag"
@@ -166,7 +263,10 @@ def _decode_image(f: Path, kind: str, work: Path, model: str = None, max_px: int
 
 
 def _caption_of(rec: dict):
-    """The single best human-readable line for a decoded item (for a glimpse)."""
+    """The single best human-readable line for a decoded item (for a glimpse/receipt).
+    Explicit images carry only the neutral marker — never a graphic caption."""
+    if rec.get("explicit"):
+        return rec.get("marker") or "intimate/explicit image"
     return (rec.get("caption") or rec.get("tag") or rec.get("transcript")
             or "; ".join(rec.get("frame_captions", [])) or None)
 
@@ -333,7 +433,12 @@ def decode_deep(files, work: Path, on_progress=None) -> dict:
     (the 3B) at full resolution with the DETAILED prompt — a richer look at the few
     images the read asked to see (no big-model tier; the 3B is enough, per the
     baseline). Returns {filename: {caption, tier:'deep'}} to merge into media.json.
-    Runs in parallel and is bounded: a hung/bad image is skipped, never stalls the batch."""
+    Runs in parallel and is bounded: a hung/bad image is skipped, never stalls the batch.
+
+    SELF-GUARDED: the deep pass classifies EXPLICIT itself (DEEP_GUARDED prompt) and
+    drops an explicit image to the neutral marker in code — so nothing graphic crosses
+    even in iterative-discovery mode, where no prior cheap-all flag exists. The server
+    also skips already-flagged explicit files in _image_files_for_ids (defense in depth)."""
     import concurrent.futures as _cf
     work.mkdir(parents=True, exist_ok=True)
     model = settings.vision_model_fast or settings.vision_model
@@ -344,8 +449,18 @@ def decode_deep(files, work: Path, on_progress=None) -> dict:
     def one(f):
         view, _ = (_prep_image(f, work, settings.decode_max_px)
                    if settings.vision_backend != "mock" else (f, 0.0))
-        cap, ms = _vlm(view, DETAILED, num_predict=settings.vision_num_predict, model=model)
-        return {"caption": cap, "tier": "deep", "_ms": ms}
+        # NSFW GATE FIRST (dedicated detector): if flagged, marker + SKIP the caption call
+        # — the graphic description is never generated. This is the real guard the deep
+        # path needs (the VLM's own EXPLICIT self-report misses real nudes).
+        if settings.mark_explicit and is_explicit_image(view):
+            return {"explicit": True, "marker": settings.explicit_marker, "tier": "explicit", "_ms": 0}
+        text, ms = _vlm(view, DEEP_GUARDED, num_predict=settings.vision_num_predict, model=model)
+        _, _, explicit, caption = _parse_combined(text)
+        if settings.mark_explicit and explicit:        # VLM self-report as a secondary backup
+            return {"explicit": True, "marker": settings.explicit_marker, "tier": "explicit", "_ms": ms}
+        if _is_refusal(caption):
+            return {"tier": "tag", "_ms": ms}        # don't leak a refusal string as a caption
+        return {"caption": caption, "tier": "deep", "_ms": ms}
 
     ex = ThreadPoolExecutor(max_workers=settings.decode_workers)
     futs = {ex.submit(one, f): f for f in files}

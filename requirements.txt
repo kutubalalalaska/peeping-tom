@@ -2,6 +2,8 @@ fastapi
 uvicorn[standard]
 python-multipart
 faster-whisper
+langdetect          # detect the chat's language from its TEXT, to guide Whisper (local, tiny)
+nudenet             # dedicated LOCAL NSFW detector — gates explicit images before captioning
 pillow
 pillow-heif
 certifi

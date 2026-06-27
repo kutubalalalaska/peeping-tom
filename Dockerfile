@@ -16,7 +16,7 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::http::Pipeline-Depth "0";\nAcqu
       > /etc/apt/apt.conf.d/99robust \
     && for i in 1 2 3 4 5 6; do \
          apt-get update \
-           && apt-get install -y --no-install-recommends --fix-missing ffmpeg curl \
+           && apt-get install -y --no-install-recommends --fix-missing ffmpeg curl libgl1 libglib2.0-0 \
            && rm -rf /var/lib/apt/lists/* && exit 0; \
          echo ">>> apt attempt $i failed (truncated download); retrying…"; sleep 5; \
        done; exit 1
@@ -24,6 +24,9 @@ RUN printf 'Acquire::ForceIPv4 "true";\nAcquire::http::Pipeline-Depth "0";\nAcqu
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Pre-bake the NudeNet model into the image so the explicit gate never does a flaky
+# runtime download (and so a broken detector surfaces at build, not mid-read).
+RUN python -c "from nudenet import NudeDetector; NudeDetector(); print('nudenet ready')"
 
 COPY mirror ./mirror
 COPY entrypoint.sh .
