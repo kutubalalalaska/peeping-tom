@@ -3,6 +3,7 @@
 import type {
   AppConfig,
   JobStatus,
+  Quota,
   ReadResult,
   ReceiptMessage,
   Retained,
@@ -14,6 +15,9 @@ async function asJson<T>(r: Response): Promise<T> {
 }
 
 export const getConfig = async () => asJson<AppConfig>(await fetch("/api/config"));
+
+// Reads left for this cookie-session (Landing readout, hosted tier).
+export const getQuota = async () => asJson<Quota>(await fetch("/api/quota"));
 
 export async function uploadChat(file: File, source: string) {
   const fd = new FormData();

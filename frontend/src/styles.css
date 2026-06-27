@@ -194,6 +194,27 @@ button { font: inherit; cursor: pointer; }
 .receipt { font-size: 13px; line-height: 1.9; white-space: pre-wrap; margin-top: 18px; }
 .sent-link { margin-top: 18px; }
 
+/* ---- self-destruct countdown (hosted tier) ---- */
+.selfdestruct {
+  font-size: 13px; letter-spacing: .04em; margin: 0 0 22px; padding: 12px 14px;
+  border: 1px solid var(--ink); display: flex; flex-direction: column; gap: 3px;
+}
+.selfdestruct strong { font-weight: 700; font-variant-numeric: tabular-nums; }
+.selfdestruct small { font-size: 11px; color: var(--muted); letter-spacing: .03em; }
+.selfdestruct.urgent { border-color: var(--accent); color: var(--accent); }
+.selfdestruct.urgent small { color: var(--accent); }
+
+/* reads-left readout on the Landing (hosted tier) */
+.quota { font-size: 11.5px; color: var(--muted); letter-spacing: .04em; margin-top: 10px; }
+
+/* live ETA appended to the progress phase line */
+.eta { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* lawful-content consent (hosted tier) */
+.consent { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px;
+  font-size: 12px; color: var(--muted); letter-spacing: .03em; cursor: pointer; }
+.consent input { margin-top: 2px; accent-color: var(--ink); }
+
 /* ---- modal ---- */
 .modal {
   position: fixed; inset: 0; display: none; align-items: center; justify-content: center;

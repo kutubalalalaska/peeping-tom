@@ -26,6 +26,15 @@ const fmt = (s: number) => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 };
 
+// H:MM:SS when over an hour, else M:SS — for the self-destruct countdown.
+const fmtClock = (s: number) => {
+  if (!isFinite(s) || s < 0) s = 0;
+  s = Math.floor(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
+};
+
 // The REAL cited photo, served locally from the export — the evidence thesis made
 // tangible (the actual image beside the caption the model wrote blind). Falls back
 // to the ASCII thumb if it can't render: a non-browser format (e.g. HEIC) or the
@@ -178,6 +187,30 @@ export default function Result() {
   const [msgs, setMsgs] = useState<Record<number, ReceiptMessage>>({});
   const [nuked, setNuked] = useState(false);
   const [receipt, setReceipt] = useState<string[]>([]);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [destroyed, setDestroyed] = useState(false);
+
+  // Self-destruct countdown: tick down to the read's expires_at (hosted tier).
+  // At zero the read is gone server-side (the sweeper deletes it) — reflect that.
+  useEffect(() => {
+    const exp = res?.expires_at;
+    if (!exp) {
+      setRemaining(null);
+      return;
+    }
+    const tick = () => {
+      const left = exp - Date.now() / 1000;
+      if (left <= 0) {
+        setRemaining(0);
+        setDestroyed(true);
+      } else {
+        setRemaining(left);
+      }
+    };
+    tick();
+    const iv = window.setInterval(tick, 1000);
+    return () => window.clearInterval(iv);
+  }, [res?.expires_at]);
 
   useEffect(() => {
     if (!id) return;
@@ -229,6 +262,25 @@ export default function Result() {
     );
   }
 
+  if (destroyed && !nuked) {
+    return (
+      <Frame step="step 4/4 · the read" hero="self-destructed" custody="✓ nothing remains">
+        <pre className="receipt">
+          {[
+            "this read has self-destructed.",
+            "",
+            "the transcript, the media, and the read —",
+            "all deleted automatically. nothing remains.",
+          ].join("\n")}
+        </pre>
+        <button className="nuke" onClick={() => nav("/")}>
+          start over
+          <small>upload another chat for a fresh read</small>
+        </button>
+      </Frame>
+    );
+  }
+
   return (
     <Frame
       step="step 4/4 · the read"
@@ -236,6 +288,13 @@ export default function Result() {
       top
       custody={nuked ? "✓ nothing remains" : "✓ raw media stays local · the read is yours to keep or destroy"}
     >
+      {remaining !== null && !nuked && (
+        <div className={"selfdestruct" + (remaining <= 60 ? " urgent" : "")}>
+          this read self-destructs in <strong>{fmtClock(remaining)}</strong>
+          <small>then the transcript, media, and read are deleted automatically — or nuke it now</small>
+        </div>
+      )}
+
       <div className="read">
         {renderRead(res.read, msgs, id ?? "")}
 

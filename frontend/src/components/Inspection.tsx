@@ -9,6 +9,14 @@ import { useSpinFrame } from "../lib/hooks";
 const tag = (t: string) =>
   t === "sticker" ? "stk" : t === "video" ? "vid" : t === "audio" ? "aud" : "img";
 
+// Coarse, honest ETA formatting ("~3m left"). Rounds to keep it from looking falsely precise.
+function fmtEta(s: number): string {
+  if (s == null || s < 0) return "";
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 // Calm, on-narrative lines that rotate during the (minutes-long) read so the
 // screen never feels dead. They restate the privacy invariant, never overstate it.
 const TIPS = [
@@ -175,6 +183,7 @@ export default function Inspection() {
   const done = s?.progress?.done ?? 0;
   const total = s?.progress?.total ?? 0;
   const recent = s?.recent ?? [];
+  const eta = s?.eta_seconds ?? null;
   const spin = SPIN[sf % SPIN.length];
 
   if (state === "error") {
@@ -236,7 +245,10 @@ export default function Inspection() {
         )}
         <div className="barrow">
           <span className="pre">{scanBar(sf)}</span>
-          <span className="phase">{spin}&nbsp;&nbsp;{msg}</span>
+          <span className="phase">
+            {spin}&nbsp;&nbsp;{msg}
+            {eta ? <span className="eta">  ·  ~{fmtEta(eta)} left</span> : null}
+          </span>
         </div>
       </Frame>
     );
@@ -281,6 +293,7 @@ export default function Inspection() {
             : total
             ? `${hasVisual ? "decode" : "transcribe"}  ${done}/${total}`
             : "parsing…"}
+          {eta ? <span className="eta">  ·  ~{fmtEta(eta)} left</span> : null}
         </span>
       </div>
     </Frame>

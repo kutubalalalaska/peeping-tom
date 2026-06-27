@@ -1,7 +1,25 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploadChat } from "../api";
+import { uploadChat, getConfig } from "../api";
 import Frame from "./Frame";
+
+// Pull a human message out of a thrown api error ("429 {\"detail\":\"…\"}").
+function friendlyError(e: unknown): string {
+  const s = String(e);
+  if (s.includes("429")) {
+    const m = s.match(/\{.*\}/);
+    if (m) {
+      try {
+        const d = JSON.parse(m[0]).detail;
+        if (d) return d;
+      } catch {
+        /* fall through */
+      }
+    }
+    return "You've reached your reads for now. Try again later.";
+  }
+  return s;
+}
 
 type Platform = "whatsapp" | "telegram";
 type OS = "iphone" | "android";
@@ -22,13 +40,14 @@ const WA_STEPS: Record<OS, string[]> = {
   ],
 };
 
-// Telegram's machine-readable export is desktop-only (mobile can't produce it), and
-// only in the non-sandboxed builds — the regular mac/win app-store Telegram lacks it.
+// The machine-readable JSON export exists ONLY in the desktop.telegram.org build.
+// Mobile can't export at all; the app-store apps and “Telegram Lite” do HTML at most —
+// which this tool can't read. So we send people specifically to the desktop build.
 const TG_STEPS: string[] = [
-  "get telegram desktop from desktop.telegram.org — or “telegram lite” on the app store.",
-  "(the regular app-store telegram can’t export — it has no export option.)",
+  "use telegram desktop from desktop.telegram.org — only this build does the JSON export.",
+  "(the app-store telegram & “telegram lite” can’t produce machine-readable JSON.)",
   "open the chat → ⋮ → “export chat history”.",
-  "set format to “machine-readable JSON”.",
+  "set format to “machine-readable JSON” — NOT html.",
   "tick photos, voice & video messages, and stickers.",
   "zip the exported folder, drop the .zip below.",
 ];
@@ -39,19 +58,26 @@ export default function Start() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [hosted, setHosted] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const nav = useNavigate();
 
+  // Consent gate only matters on the hosted exhibit (you process others' uploads).
+  useEffect(() => {
+    getConfig().then((c) => setHosted(c.hosted)).catch(() => undefined);
+  }, []);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!file || !platform) return;
+    if (!file || !platform || (hosted && !agreed)) return;
     setErr(null);
     setBusy(true);
     try {
       const { job_id } = await uploadChat(file, platform);
       nav(`/job/${job_id}`);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
       setBusy(false);
     }
   }
@@ -124,10 +150,16 @@ export default function Start() {
             <button type="button" className="opt" onClick={() => inputRef.current?.click()}>
               [ {file ? file.name.slice(0, 28) : "choose .zip"} ]
             </button>
-            <button type="submit" className="opt solid" disabled={!file || busy}>
+            <button type="submit" className="opt solid" disabled={!file || busy || (hosted && !agreed)}>
               [ {busy ? "uploading…" : "upload .zip →"} ]
             </button>
           </div>
+          {hosted && (
+            <label className="consent">
+              <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
+              <span>this is my own conversation and it contains no illegal content.</span>
+            </label>
+          )}
         </div>
         {err && <p className="err">{err}</p>}
       </form>

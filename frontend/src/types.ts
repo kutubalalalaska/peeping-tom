@@ -59,6 +59,9 @@ export interface JobStatus {
   frontier_ready?: boolean;
   deletion?: Deletion | null;
   retained?: Retained;
+  expires_at?: number | null;  // epoch seconds: when this read self-destructs (hosted tier)
+  eta_seconds?: number | null; // live, self-correcting estimate of time left in the current phase
+  eta_phase?: string;          // "transcribing" | "reading" — which phase the ETA is for
   ts?: number;
 }
 
@@ -83,6 +86,17 @@ export interface AppConfig {
   frontier_ready: boolean;
   default_route?: string;
   routes?: ReadRoute[];
+  read_ttl_seconds?: number;   // how long a read lives after it's ready (hosted tier)
+}
+
+// Reads left for this cookie-session (hosted tier). No PII — keyed on an opaque
+// session cookie; incognito / cleared cookies simply get a fresh allowance.
+export interface Quota {
+  enabled: boolean;
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+  window_seconds?: number;
 }
 
 export interface ReadResult {
@@ -95,6 +109,7 @@ export interface ReadResult {
   first_read?: string;
   inspected?: string[];
   deep_count?: number;
+  expires_at?: number | null;  // epoch seconds: when this read self-destructs (hosted tier)
 }
 
 // A cited message, resolved for a clickable [#id] receipt.
