@@ -27,11 +27,13 @@ def _d(job_id: str) -> Path:
     return ROOT / job_id
 
 
-def create(source: str) -> str:
+def create(source: str, sid: str = None, ip: str = None) -> str:
     jid = uuid.uuid4().hex[:12]
     (_d(jid) / "export").mkdir(parents=True, exist_ok=True)
     (_d(jid) / "work").mkdir(parents=True, exist_ok=True)
-    set_status(jid, state="uploaded", message="upload received", source=source)
+    # created_at anchors the garbage sweep; sid/ip power the (no-PII) rate moat.
+    set_status(jid, state="uploaded", message="upload received", source=source,
+               created_at=time.time(), sid=sid, ip=ip)
     return jid
 
 
@@ -85,3 +87,59 @@ def delete_raw(job_id: str):
 def delete(job_id: str):
     """Remove everything for this job."""
     shutil.rmtree(_d(job_id), ignore_errors=True)
+
+
+# ---- hosted-tier: self-destruct + rate moat ----
+
+def all_ids():
+    """Every job id currently on disk (dir name)."""
+    if not ROOT.exists():
+        return []
+    return [p.name for p in ROOT.iterdir() if p.is_dir()]
+
+
+def recent_count(window: int, sid: str = None, ip: str = None) -> int:
+    """How many jobs were created in the last `window` seconds matching `sid` and/or
+    `ip`. Powers the (no-PII) rate cap and the Landing quota readout — derived from the
+    job store, so there's nothing extra to persist. A null sid/ip matches nothing
+    (an un-cookied or unknown client isn't lumped in with others)."""
+    if not sid and not ip:
+        return 0
+    cutoff = time.time() - window
+    n = 0
+    for jid in all_ids():
+        s = get_status(jid)
+        if not s or (s.get("created_at") or s.get("ts") or 0) < cutoff:
+            continue
+        if (sid and s.get("sid") == sid) or (ip and s.get("ip") == ip):
+            n += 1
+    return n
+
+
+def purge_expired() -> int:
+    """Delete jobs whose time is up. Two rules (see config):
+      - FINISHED reads self-destruct READ_TTL after they were ready (`expires_at`).
+      - UNFINISHED/abandoned jobs are swept once older than MAX_JOB_AGE (the
+        garbage rule — generous, so a slow in-flight decode is never killed).
+    Returns the number deleted. Safe to call repeatedly (the in-process sweeper and
+    scripts/purge.py both use it)."""
+    now = time.time()
+    deleted = 0
+    for jid in all_ids():
+        try:
+            s = get_status(jid)
+            if not s:                                   # no status yet — judge by dir age
+                age = now - _d(jid).stat().st_mtime
+                if age > settings.max_job_age_seconds:
+                    delete(jid); deleted += 1
+                continue
+            exp = s.get("expires_at")
+            born = s.get("created_at") or s.get("ts") or now
+            if exp is not None:                         # finished read with a TTL
+                if now >= exp:
+                    delete(jid); deleted += 1
+            elif (now - born) > settings.max_job_age_seconds:   # never finished → garbage
+                delete(jid); deleted += 1
+        except Exception:
+            continue                                    # never let one bad job stop the sweep
+    return deleted

@@ -195,6 +195,28 @@ class Settings:
     hosted: bool = _b("HOSTED")                # hosted "exhibit" tier — consent + server-side decode
     ephemeral: bool = _b("EPHEMERAL")          # delete raw media + transcript after the read
 
+    # --- hosted-tier: self-destruct (TTL) ---
+    # The read self-destructs READ_TTL_SECONDS after it is READY (state=done) — the
+    # countdown the result page shows. Unfinished/abandoned jobs ("garbage") are swept
+    # separately: anything that never reached `done` is purged once older than
+    # MAX_JOB_AGE_SECONDS (kept well above worst-case CPU decode so a slow job is never
+    # killed mid-flight). The in-process sweeper runs every PURGE_INTERVAL_SECONDS;
+    # scripts/purge.py does the same for a real system cron.
+    read_ttl_seconds: int = int(os.environ.get("READ_TTL_SECONDS", "600"))          # 10 min after the read is ready
+    max_job_age_seconds: int = int(os.environ.get("MAX_JOB_AGE_SECONDS", "3600"))   # garbage sweep for never-finished jobs
+    purge_interval_seconds: int = int(os.environ.get("PURGE_INTERVAL_SECONDS", "120"))
+
+    # --- hosted-tier: abuse moat (no login, no PII) ---
+    # Cap reads per ephemeral cookie-session and per client IP over a rolling window.
+    # The cookie cap deters casual re-runs (incognito/clearing cookies resets it); the
+    # IP cap + a CDN in front are the real teeth. Counted by scanning the job store, so
+    # there is nothing extra to persist and it stays inspectable.
+    rate_window_seconds: int = int(os.environ.get("RATE_WINDOW_SECONDS", "86400"))  # 24h
+    rate_max_per_session: int = int(os.environ.get("RATE_MAX_PER_SESSION", "5"))
+    rate_max_per_ip: int = int(os.environ.get("RATE_MAX_PER_IP", "20"))
+    session_cookie: str = os.environ.get("SESSION_COOKIE", "mirror_sid")
+    cookie_secure: bool = _b("COOKIE_SECURE")  # set in prod (HTTPS) so the cookie is Secure
+
     data_dir: str = os.environ.get("DATA_DIR", "/data")
     web_dir: str = os.environ.get("WEB_DIR", "")   # built React SPA; empty -> placeholder pages
 

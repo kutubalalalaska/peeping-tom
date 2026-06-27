@@ -1,7 +1,8 @@
 """FastAPI server — the whole web layer. Uses only internal modules.
 
 API:
-    GET    /api/config                  {hosted, frontier_ready, routes[], default_route}
+    GET    /api/config                  {hosted, frontier_ready, routes[], default_route, read_ttl_seconds}
+    GET    /api/quota                   reads left for this cookie-session (hosted tier)
     POST   /api/upload                  zip + source -> job -> LOCAL preprocess (background)
     GET    /api/jobs/{id}               status (poll): state, participants, progress, recent…
     POST   /api/jobs/{id}/role          which participant is "me" (picked from the parsed list)
@@ -32,6 +33,51 @@ SPA = bool(WEB and (WEB / "index.html").exists())
 
 app = FastAPI(title="Inward Mirror")
 
+
+def _client_ip(request: Request) -> str:
+    """Real client IP, honouring a CDN / reverse proxy in front (Cloudflare, Caddy).
+    Falls back to the socket peer for a direct connection."""
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+@app.middleware("http")
+async def _session_cookie(request: Request, call_next):
+    """Give every browser an opaque, no-PII session id in an httponly cookie. It only
+    powers the rate moat + 'reads left' readout — never tied to identity. Incognito /
+    cleared cookies simply get a fresh one (a soft moat; the IP cap is the backstop)."""
+    sid = request.cookies.get(settings.session_cookie)
+    fresh = not sid
+    if fresh:
+        sid = uuid.uuid4().hex
+    request.state.sid = sid
+    response = await call_next(request)
+    if fresh:
+        response.set_cookie(settings.session_cookie, sid, max_age=60 * 60 * 24 * 30,
+                            httponly=True, samesite="lax", secure=settings.cookie_secure)
+    return response
+
+
+@app.on_event("startup")
+def _start_sweeper():
+    """In-process self-destruct sweeper: purge expired reads + abandoned jobs on a
+    timer (works out of the box; scripts/purge.py covers a real system cron too)."""
+    def loop():
+        while True:
+            try:
+                n = jobs.purge_expired()
+                if n:
+                    print(f"[purge] deleted {n} expired/abandoned job(s)", flush=True)
+            except Exception as e:
+                print(f"[purge] error: {e}", flush=True)
+            time.sleep(max(15, settings.purge_interval_seconds))
+    threading.Thread(target=loop, daemon=True).start()
+
 _DECODABLE = {"image", "sticker", "audio", "video"}
 
 
@@ -53,17 +99,19 @@ def _preprocess(job_id: str):
             jobs.set_status(job_id, state="error", message="couldn't read any messages from this export"); return
 
         media = ingest.media_files(exp, source)
-        # Iterative discovery decodes only audio up front (text-first); images are
-        # decoded on demand during the read loop. Otherwise: cheap-all decode now.
-        to_decode = [f for f in media if decode.file_type(f) == "audio"] if settings.iterative_discovery else media
+        # Iterative discovery decodes SPEECH up front (voice notes + video messages —
+        # text-first); images are decoded on demand during the read loop. Otherwise:
+        # cheap-all decode now.
+        to_decode = ([f for f in media if decode.file_type(f) in ("audio", "video")]
+                     if settings.iterative_discovery else media)
         # Drop anything already captioned without the VLM (Telegram .tgs emoji stickers).
         to_decode = [f for f in to_decode if f.name not in predecoded]
         total = sum(1 for f in to_decode if decode.file_type(f) in _DECODABLE)
-        # Iterative discovery is text-first: the up-front pass only transcribes voice
-        # notes (images are opened on demand during the read). Present it as ONE
-        # "parsing" step — parse is already done; this is just audio (or instant).
+        # Iterative discovery is text-first: the up-front pass transcribes speech (voice
+        # notes + video messages); images are opened on demand during the read. Present it
+        # as ONE "parsing" step — parse is already done; this is just speech (or instant).
         if settings.iterative_discovery:
-            msg = ("parsing your chat and transcribing voice notes — on this machine…"
+            msg = ("parsing your chat and transcribing voice & video messages — on this machine…"
                    if total else "parsing your chat on this machine…")
         else:
             msg = "decoding your media on this machine…"
@@ -280,7 +328,7 @@ def _read(job_id: str):
             jobs.delete_raw(job_id)
             deletion = {"raw_media_deleted_at": time.strftime("%H:%M:%S"),
                         "transcript_deleted_at": time.strftime("%H:%M:%S")}
-        jobs.set_status(job_id, state="done", message="read ready",
+        jobs.set_status(job_id, state="done", message="read ready", expires_at=expires_at, eta_seconds=None,
                         deletion=deletion, deep_count=len(inspected), retained=jobs.retained(job_id))
     except frontier.NotConfigured as e:
         jobs.set_status(job_id, state="needs_config", message=str(e))
@@ -292,14 +340,41 @@ def _read(job_id: str):
 @app.get("/api/config")
 def get_config():
     return {"hosted": settings.hosted, "frontier_ready": settings.frontier_ready(),
-            "routes": settings.public_routes(), "default_route": settings.default_route_id()}
+            "routes": settings.public_routes(), "default_route": settings.default_route_id(),
+            "read_ttl_seconds": settings.read_ttl_seconds}
+
+
+@app.get("/api/quota")
+def quota(request: Request):
+    """Reads left for this cookie-session (Landing readout). Hosted tier only; off-tier
+    there is no cap, so limit is null. No PII — keyed on the opaque session cookie."""
+    if not settings.hosted:
+        return {"enabled": False, "limit": None, "used": 0, "remaining": None}
+    used = jobs.recent_count(settings.rate_window_seconds, sid=request.state.sid)
+    limit = settings.rate_max_per_session
+    return {"enabled": True, "limit": limit, "used": used,
+            "remaining": max(0, limit - used), "window_seconds": settings.rate_window_seconds}
 
 
 @app.post("/api/upload")
-async def upload(bg: BackgroundTasks, file: UploadFile, source: str = Form("whatsapp")):
-    jid = jobs.create(source=source)
+async def upload(request: Request, bg: BackgroundTasks, file: UploadFile, source: str = Form("whatsapp")):
+    # Abuse moat (hosted tier only): cap reads per cookie-session and per IP over a
+    # rolling window. No login, no PII — just enough to stop scraping + runaway spend.
+    if settings.hosted:
+        sid, ip = request.state.sid, _client_ip(request)
+        if jobs.recent_count(settings.rate_window_seconds, sid=sid) >= settings.rate_max_per_session:
+            raise HTTPException(429, "You've reached your reads for now. Try again later.")
+        if ip and jobs.recent_count(settings.rate_window_seconds, ip=ip) >= settings.rate_max_per_ip:
+            raise HTTPException(429, "This network has reached its reads for now. Try again later.")
+        jid = jobs.create(source=source, sid=sid, ip=ip)
+    else:
+        jid = jobs.create(source=source)
     zp = jobs.path(jid, "upload.zip")
-    zp.write_bytes(await file.read())
+    # Stream the upload to disk in chunks — a multi-GB export would otherwise load
+    # whole into RAM via file.read() and risk OOM on a small Docker VM.
+    with zp.open("wb") as out:
+        while chunk := await file.read(4 * 1024 * 1024):
+            out.write(chunk)
     ingest.unzip(zp, jobs.path(jid, "export"))
     zp.unlink(missing_ok=True)
     bg.add_task(_preprocess, jid)
