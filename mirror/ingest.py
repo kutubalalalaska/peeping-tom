@@ -166,9 +166,17 @@ _TG_SKIP_EXT = {".json", ".html", ".htm", ".css", ".js"}
 def media_files(folder: Path, source: str = "whatsapp"):
     """All raw media files in the export (the bytes that stay local). Excludes the
     export's own text/markup — _chat.txt for WhatsApp, result.json + HTML chrome
-    for Telegram."""
+    for Telegram — and macOS zip cruft (a `__MACOSX/` tree of `._name` AppleDouble
+    sidecars that would otherwise be decoded as junk 'media')."""
     skip = _TG_SKIP_EXT if source == "telegram" else {".txt"}
-    return [f for f in folder.rglob("*") if f.is_file() and f.suffix.lower() not in skip]
+    out = []
+    for f in folder.rglob("*"):
+        if not f.is_file() or f.suffix.lower() in skip:
+            continue
+        if f.name.startswith("._") or "__MACOSX" in f.parts:   # macOS AppleDouble / metadata
+            continue
+        out.append(f)
+    return out
 
 
 def participants(messages):
