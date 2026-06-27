@@ -1,0 +1,16 @@
+# Auto-HTTPS reverse proxy for the hosted exhibit. DOMAIN + ACME_EMAIL come from
+# .env (passed through docker-compose.prod.yml). Caddy fetches + renews the TLS
+# cert automatically once DOMAIN's DNS points here and ports 80/443 are open.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+	# Bound upload size so a huge zip can't exhaust memory (the app reads the
+	# upload into RAM). Friends' exports with media are usually well under this.
+	request_body {
+		max_size 200MB
+	}
+	reverse_proxy app:8000
+}

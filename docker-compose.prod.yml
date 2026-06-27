@@ -1,0 +1,97 @@
+# PRODUCTION — the hosted "exhibit" tier on a CPU VPS, behind HTTPS.
+#
+#   Caddy (:80/:443, auto-TLS)  ->  app (:8000)  ->  ollama (CPU vision)
+#                                      |
+#                                      +-- read = GLM-5.2 via OpenRouter (ROUTE_A_*, ZDR)
+#
+# Privacy/safety posture baked in here (all map to real code — no theatre):
+#   - HOSTED=1            consent gate + server-side decode narration
+#   - EPHEMERAL=0         keep artifacts so the read + receipts work UNTIL...
+#   - self-destruct       ...the read auto-deletes READ_TTL_SECONDS after it's ready
+#                         (countdown on the result page); abandoned jobs swept too
+#   - rate moat           per-cookie + per-IP caps (no login, no PII)
+#   - COOKIE_SECURE=1     the session cookie is Secure (we're behind Caddy TLS)
+#
+# CPU decode is the only heavy part (the read is an API call). It's tuned DOWN for
+# CPU: the 3B vision model for BOTH passes, iterative discovery (decode only the
+# images the read asks for), small images, capped image count. Needs ~8GB RAM.
+#
+# One-time:
+#   cp .env.example .env      # set ROUTE_A_API_KEY, DOMAIN, ACME_EMAIL
+#   # point DOMAIN's DNS A-record at this VPS; open ports 80 + 443
+# Run:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   # first boot pulls qwen2.5vl:3b (a few minutes) — watch: docker compose -f docker-compose.prod.yml logs -f
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30          # first run downloads the model — give it room
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file: .env          # ROUTE_A_* (the read) — never committed
+    environment:
+      # --- read + decode wiring ---
+      OLLAMA_HOST: http://ollama:11434
+      VISION_BACKEND: ollama
+      VISION_MODEL: qwen2.5vl:3b          # deep pass on CPU — 3B, NOT 7B
+      VISION_MODEL_FAST: qwen2.5vl:3b     # cheap-all pass (same model = one pull)
+      OLLAMA_KEEP_ALIVE: 30m
+      # --- CPU decode tuning (keep it usable on CPU) ---
+      ITERATIVE_DISCOVERY: "1"            # text/audio first; only decode images the read requests
+      DECODE_MAX_PX_FAST: "512"
+      DECODE_MAX_PX: "768"
+      DECODE_WORKERS: "2"
+      VISION_TIMEOUT: "180"               # CPU is slow per image
+      MAX_INSPECT_ROUNDS: "2"
+      MAX_INSPECT_IMAGES: "8"
+      DEEP_SELECT_K: "6"
+      WHISPER_MODEL: base
+      # --- hosted tier: consent + self-destruct + abuse moat ---
+      HOSTED: "1"
+      EPHEMERAL: "0"
+      COOKIE_SECURE: "1"
+      READ_TTL_SECONDS: "600"             # read self-destructs 10 min after it's ready
+      MAX_JOB_AGE_SECONDS: "3600"         # garbage sweep for never-finished jobs
+      PURGE_INTERVAL_SECONDS: "120"
+      RATE_MAX_PER_SESSION: "5"
+      RATE_MAX_PER_IP: "20"
+      RATE_WINDOW_SECONDS: "86400"
+      DATA_DIR: /data
+    volumes:
+      - mirror-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"             # localhost-only (for debugging on the VPS); Caddy serves the world
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  ollama-models:
+  mirror-data:
+  caddy-data:
+  caddy-config:
