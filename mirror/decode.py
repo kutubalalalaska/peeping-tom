@@ -19,7 +19,7 @@ Vision goes to the bundled Ollama service; audio uses faster-whisper. Images run
 through a thread pool; decode reports per-item progress and prints a timing line.
 """
 
-import base64, json, re, subprocess, time, urllib.request
+import base64, gc, json, re, subprocess, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -304,23 +304,62 @@ def detect_language(text: str):
         return None
 
 
-def _transcribe(f: Path, work: Path, wm, language: str = None) -> str:
+def _transcribe(f: Path, work: Path, wm, language: str = None):
     """Whisper-transcribe the audio of a voice note OR a video message (we strip VIDEO with
-    -vn and keep the audio track). Returns "" if there's no usable audio. Quality params:
-    `language` forces the language (skips the flaky per-clip auto-detect; None = auto),
-    vad_filter trims silence (cuts hallucination), condition_on_previous_text=False stops
-    repetition loops, beam_size from config."""
+    -vn and keep the audio track). Returns (text, quality) — quality carries the per-segment
+    confidence Whisper already computes (fuel for the escalation gate), or None if there was
+    no usable audio. Quality params: `language` forces the language (skips the flaky per-clip
+    auto-detect; None = auto), vad_filter trims silence (cuts hallucination),
+    condition_on_previous_text=False stops repetition loops, beam_size from config."""
     wav = work / (f.stem + ".wav")
     subprocess.run(["ffmpeg", "-y", "-i", str(f), "-vn", "-ar", "16000", "-ac", "1", str(wav)],
                    capture_output=True)
     try:
         if not wav.exists() or wav.stat().st_size < 1000:   # no / empty audio track
-            return ""
-        seg, _ = wm.transcribe(str(wav), language=language or None, beam_size=settings.whisper_beam,
-                               vad_filter=True, condition_on_previous_text=False)
-        return " ".join(s.text.strip() for s in seg).strip()
+            return "", None
+        seg, info = wm.transcribe(str(wav), language=language or None, beam_size=settings.whisper_beam,
+                                  vad_filter=True, condition_on_previous_text=False)
+        segs = list(seg)
+        text = " ".join(s.text.strip() for s in segs).strip()
+        spoken = sum(s.end - s.start for s in segs)
+        q = {
+            "duration": getattr(info, "duration", 0.0) or spoken,     # full clip length (s)
+            "speech": bool(segs),                                     # VAD found speech at all
+            "avg_logprob": (sum(s.avg_logprob * (s.end - s.start) for s in segs) / spoken
+                            if spoken > 0 else None),                  # duration-weighted confidence
+            "compression_ratio": max((s.compression_ratio for s in segs), default=None),
+        }
+        return text, q
     finally:
         wav.unlink(missing_ok=True)
+
+
+def _suspect_transcript(text: str, q, language: str):
+    """Gate for the tiered-ASR escalation: does this pass-1 transcript look like garbage?
+    Returns (severity, reason) — lower severity = worse, so suspects sort worst-first —
+    or None if the transcript looks fine. Signals, most certain first: VAD found speech
+    but no text came out; the output is in a different language than the one we forced
+    (mixed-language chats); a repetition loop (compression_ratio, OpenAI's own failure
+    threshold); low decoder confidence (duration-weighted avg_logprob)."""
+    if not q:
+        return None
+    if not text:
+        return (-10.0, "empty") if q["speech"] else None
+    lp = q["avg_logprob"]
+    if language and len(text) >= 60:
+        try:
+            from langdetect import detect, DetectorFactory
+            DetectorFactory.seed = 0
+            if detect(text[:2000]).split("-")[0] != language:
+                return (min(lp if lp is not None else 0.0, -3.0), "lang")
+        except Exception:
+            pass
+    cr = q["compression_ratio"]
+    if cr is not None and cr > 2.4:
+        return (min(lp if lp is not None else 0.0, -2.0), "loop")
+    if lp is not None and lp < settings.whisper_escalate_logprob:
+        return (lp, "logprob")
+    return None
 
 
 def _is_video_note(f: Path) -> bool:
@@ -371,6 +410,7 @@ def decode_media(files, work: Path, on_progress=None, language: str = None) -> d
     # speech: voice notes + video messages share one Whisper load.
     audio_files = list(by.get("audio", []))
     video_files = list(by.get("video", []))
+    suspects = []                                    # (severity, reason, duration_s, file, rec)
     if settings.vision_backend == "mock":
         for f in audio_files:
             step(f.name, {"type": "audio", "transcript": f"[mock transcript {f.stem[-6:]}]"})
@@ -387,7 +427,11 @@ def decode_media(files, work: Path, on_progress=None, language: str = None) -> d
             if wm is None:
                 break                                # already error-stepped above
             try:
-                rec = {"type": "audio", "transcript": _transcribe(f, work, wm, language)}
+                tx, q = _transcribe(f, work, wm, language)
+                rec = {"type": "audio", "transcript": tx}
+                flag = _suspect_transcript(tx, q, language)
+                if flag:
+                    suspects.append((flag[0], flag[1], q["duration"], f, rec))
             except Exception as e:
                 rec = {"type": "audio", "error": str(e)}
             step(f.name, rec)
@@ -403,9 +447,12 @@ def decode_media(files, work: Path, on_progress=None, language: str = None) -> d
             if settings.transcribe_video and wm is not None:
                 if _is_video_note(f) or f.stat().st_size <= settings.video_max_mb * 1_000_000:
                     try:
-                        tx = _transcribe(f, work, wm, language)
+                        tx, q = _transcribe(f, work, wm, language)
                         if tx:
                             rec["transcript"] = tx
+                        flag = _suspect_transcript(tx, q, language)
+                        if flag:
+                            suspects.append((flag[0], flag[1], q["duration"], f, rec))
                     except Exception as e:
                         rec["error"] = str(e)
             if not settings.iterative_discovery:     # visual frames only for small (cheap-all) chats
@@ -420,6 +467,46 @@ def decode_media(files, work: Path, on_progress=None, language: str = None) -> d
                 except Exception as e:
                     rec.setdefault("error", str(e))
         step(f.name, rec)
+
+    # Tiered ASR escalation: re-run the clips whose pass-1 transcript scored as garbage on
+    # the bigger model — worst-first, under a cap on total re-run audio (a pathological chat
+    # can't turn decode into an all-nighter). The small model is freed before the big one
+    # loads, so peak RAM stays ≈ one model. Fail-open: any failure here (model download,
+    # OOM) keeps the pass-1 transcripts and logs loudly — never kills the decode.
+    esc = settings.whisper_escalate_model.strip()
+    if suspects and esc and esc != settings.whisper_model:
+        try:
+            suspects.sort(key=lambda s: s[0])
+            cap = settings.whisper_escalate_max_s
+            budget = float(cap) if cap > 0 else float("inf")
+            chosen = []
+            for sev, reason, dur, f, rec in suspects:
+                if dur <= budget:
+                    chosen.append((f, rec, reason))
+                    budget -= dur
+            if chosen:
+                t0 = time.monotonic()
+                from faster_whisper import WhisperModel
+                del wm; gc.collect()
+                wm = WhisperModel(esc, device="cpu", compute_type="int8")
+                fixed = 0
+                for f, rec, reason in chosen:
+                    try:
+                        tx2, _ = _transcribe(f, work, wm, language)
+                    except Exception:
+                        continue                     # keep the pass-1 text for this clip
+                    if tx2 and tx2 != rec.get("transcript"):
+                        rec["transcript"] = tx2
+                        fixed += 1
+                    rec["asr"] = {"escalated": esc, "reason": reason}
+                    if on_progress:
+                        on_progress(done, total, {"file": f.name, "type": rec.get("type"),
+                                                  "caption": _caption_of(rec)})
+                print(f"[whisper] escalation: {len(chosen)}/{len(suspects)} flagged clips re-run "
+                      f"on {esc} in {time.monotonic() - t0:.0f}s | {fixed} transcripts replaced | "
+                      f"cap {cap if cap > 0 else 'none'}s", flush=True)
+        except Exception as e:
+            print(f"[whisper] escalation FAILED (keeping pass-1 transcripts): {e}", flush=True)
 
     for f in by.get("document", []):
         out.setdefault(f.name, {"type": "document"})

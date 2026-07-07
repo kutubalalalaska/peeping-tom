@@ -132,6 +132,14 @@ class Settings:
     # cut hallucination-on-silence and repetition loops, language-agnostic.)
     whisper_language: str = os.environ.get("WHISPER_LANGUAGE", "")     # "" = detect-from-corpus
     whisper_beam: int = int(os.environ.get("WHISPER_BEAM", "5"))
+    # Tiered ASR: everything transcribes on whisper_model (fast); clips whose pass-1 result
+    # scores as garbage (empty despite speech / wrong language / repetition loop / low decoder
+    # confidence) are re-run ONCE on the bigger escalate model, worst-first, under a cap on
+    # total re-run audio seconds (0 = uncapped). All local — costs time, never privacy.
+    # "" disables escalation; large-v3-turbo ≈ large-v3 quality at ~5x its speed.
+    whisper_escalate_model: str = os.environ.get("WHISPER_ESCALATE_MODEL", "large-v3-turbo")
+    whisper_escalate_max_s: int = int(os.environ.get("WHISPER_ESCALATE_MAX_SECONDS", "1800"))
+    whisper_escalate_logprob: float = float(os.environ.get("WHISPER_ESCALATE_LOGPROB", "-0.8"))
     # Transcribe the AUDIO of video messages (round video notes) — many people use them as a
     # primary channel, so their speech is high-signal. Round notes are always transcribed;
     # larger shared clips only if under video_max_mb (avoid transcribing long movies). The
