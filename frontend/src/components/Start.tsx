@@ -45,7 +45,6 @@ const WA_STEPS: Record<OS, string[]> = {
 // which this tool can't read. So we send people specifically to the desktop build.
 const TG_STEPS: string[] = [
   "use telegram desktop from desktop.telegram.org — only this build does the JSON export.",
-  "(the app-store telegram & “telegram lite” can’t produce machine-readable JSON.)",
   "open the chat → ⋮ → “export chat history”.",
   "set format to “machine-readable JSON” — NOT html.",
   "tick photos, voice & video messages, and stickers.",
@@ -150,7 +149,11 @@ export default function Start() {
             <button type="button" className="opt" onClick={() => inputRef.current?.click()}>
               [ {file ? file.name.slice(0, 28) : "choose .zip"} ]
             </button>
-            <button type="submit" className="opt solid" disabled={!file || busy || (hosted && !agreed)}>
+            <button
+              type="submit"
+              className={"opt solid" + (file && (!hosted || agreed) ? " ok" : "")}
+              disabled={!file || busy || (hosted && !agreed)}
+            >
               [ {busy ? "uploading…" : "upload .zip →"} ]
             </button>
           </div>

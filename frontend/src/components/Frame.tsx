@@ -25,13 +25,12 @@ export default function Frame({
   return (
     <>
       <div className="meta">
-        <span>immovable object</span>
+        <span>drop 001: peeping tom</span>
         <span>{run ?? ""}</span>
       </div>
       <div className="frame">
         <div className="stepline">
           <span>{step}</span>
-          <span className="dim">immovable object</span>
         </div>
         <div className="hero">
           &gt; {typed}
@@ -41,7 +40,7 @@ export default function Frame({
         <div className="foot">
           <div className="nav">{nav}</div>
           <span className="custody">
-            {custody ?? "processed on this machine — nothing leaves it"}
+            {custody}
           </span>
         </div>
       </div>

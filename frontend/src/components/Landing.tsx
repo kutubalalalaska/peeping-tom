@@ -3,15 +3,17 @@ import { useNavigate } from "react-router-dom";
 import Frame from "./Frame";
 import DataFlowModal from "./DataFlowModal";
 import { getQuota } from "../api";
+import { SPIN } from "../lib/ascii";
+import { useSpinFrame } from "../lib/hooks";
 import type { Quota } from "../types";
 
 // Entry. Spare by design — the manifesto is held until launch. Copy here is
 // placeholder for the narrative thread to refine.
 export default function Landing() {
   const [modal, setModal] = useState(false);
-  const [panel, setPanel] = useState(false);
   const [quota, setQuota] = useState<Quota | null>(null);
   const nav = useNavigate();
+  const spin = SPIN[useSpinFrame(true) % SPIN.length];
 
   // Reads-left readout (hosted tier only; off-tier the endpoint returns enabled:false).
   useEffect(() => {
@@ -19,12 +21,17 @@ export default function Landing() {
   }, []);
   return (
     <>
-      <Frame step="immovable object" hero="a mirror, pointed inward">
+      <Frame 
+        step="" 
+        hero="Please upload your chat."
+      >
         <div className="ln">
           <div className="hint2">
-            upload a chat. it's decoded on this machine — only the text is read by a
-            frontier model, which reads your patterns back to you, cited to the
-            actual messages.
+            This demonstration has a zero-retention policy. We process the media locally and we
+            use open source LLM providers to analyze the conversations. Once the demonstration is over
+            you can delete your data, otherwise it will be automatically erased no later than in 24 hours.
+            Please enjoy the demonstration
+
           </div>
         </div>
         <div className="ln" style={{ animationDelay: "80ms" }}>
@@ -43,19 +50,18 @@ export default function Landing() {
         </div>
         <div className="ln" style={{ animationDelay: "160ms" }}>
           <div className="links">
-            <button className="link" onClick={() => setPanel(!panel)}>
-              how to run it yourself
-            </button>
+            <a
+              className="link"
+              href="https://github.com/kutubalalalaska/immovable-object-part-1"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Source
+            </a>
             <button className="link" onClick={() => setModal(true)}>
-              how your data is processed →
+              Data cycle&nbsp;{spin}
             </button>
           </div>
-          {panel && (
-            <p className="panel">
-              open-source · <span className="pre">docker compose up</span> on your
-              own machine. the raw media never leaves your control.
-            </p>
-          )}
         </div>
       </Frame>
       <DataFlowModal open={modal} onClose={() => setModal(false)} />

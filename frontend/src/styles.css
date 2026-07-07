@@ -95,11 +95,12 @@ button { font: inherit; cursor: pointer; }
 .opt:disabled { opacity: .4; cursor: default; }
 .opt:disabled:hover { background: var(--paper); color: var(--ink); }
 .opt.solid:disabled:hover { background: var(--ink); color: #fff; }
+.opt.solid.ok, .opt.solid.ok:hover, .opt.solid.ok:disabled:hover { background: var(--success); color: #fff; }
 
 .links { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 16px; }
 .link {
   background: none; border: none; padding: 0; font-size: 12.5px; color: var(--muted);
-  border-bottom: 1px solid var(--placeholder);
+  border-bottom: 1px solid var(--placeholder); text-decoration: none;
 }
 .link:hover { color: var(--ink); border-color: var(--ink); }
 .panel { font-size: 12.5px; color: var(--secondary); line-height: 1.7; margin-top: 14px; }

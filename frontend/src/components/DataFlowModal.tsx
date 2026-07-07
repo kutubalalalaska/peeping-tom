@@ -31,7 +31,7 @@ const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
 // Where the custody narration steps fire (seconds). Text is built from the live
 // config at fire-time, so the copy can never overstate what the backend does.
-const FOOT_T = [0.2, 1.0, 1.7, 2.9, 3.4, 8.0, 8.9, 10.3];
+const FOOT_T = [0.2, 2.2, 4.2, 6.4, 8.9, 12.0, 12.9, 14.3];
 function footStep(i: number, c: Cfg): [string, string, string] {
   const where = c.hosted ? "on the server" : "on this machine";
   const provider = c.route?.third_party ? "openrouter" : "your vps";
@@ -41,7 +41,7 @@ function footStep(i: number, c: Cfg): [string, string, string] {
     case 0: return ["", "this is you, with your exported chat.", ""];
     case 1: return ["", c.hosted ? "our server comes online." : "your machine does the work.", ""];
     case 2: return ["01", `you upload — the .zip is read ${where}.`, ""];
-    case 3: return ["02", `images are decoded ${where} — and never sent.`, ""];
+    case 3: return ["02", `images are decoded ${where}. `, ""];
     case 4: return ["03", `only the text transcript goes to ${model} via ${provider}${ret}.`, ""];
     case 5: return ["04", "analysis complete.", "green"];
     case 6: return ["05", "the read comes back to you.", "green"];
@@ -49,7 +49,7 @@ function footStep(i: number, c: Cfg): [string, string, string] {
   }
 }
 
-// The choreographed custody animation (~12.8s loop), ported from the design
+// The choreographed custody animation (~16.8s loop), ported from the design
 // prototype's requestAnimationFrame logic into a React effect (cancelled on close).
 export default function DataFlowModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -178,7 +178,7 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
       return "[" + "█".repeat(f) + "░".repeat(W - f) + "] " + String(Math.round(p * 100)).padStart(3, " ") + "%" + (done ? " ✓" : "");
     };
 
-    const T = { you: 0.2, server: 1.0, zip0: 1.7, zip1: 2.9, proc: 2.9, procEnd: 8.0, send0: 8.9, send1: 10.0, del0: 10.3, delEnd: 11.3, hold: 12.8 };
+    const T = { you: 0.2, server: 2.2, zip0: 4.2, zip1: 6.4, proc: 6.4, procEnd: 12.0, send0: 12.9, send1: 14.0, del0: 14.3, delEnd: 15.3, hold: 16.8 };
 
     function fit() { const w = scaler!.clientWidth, k = Math.min(1, w / 1000); stage!.style.transform = "scale(" + k + ")"; scaler!.style.height = 420 * k + "px"; }
     window.addEventListener("resize", fit);
@@ -230,7 +230,7 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
           <span>how your data is processed</span>
           <button className="modalx" onClick={onClose}>[ esc ]</button>
         </div>
-        <div className="df-h1">watch where it goes, and where it dies.</div>
+        <div className="df-h1">Here is how we proceed your data</div>
         <div ref={scalerRef} id="df_scaler">
           <div ref={stageRef} id="df_stage">
             <svg className="fly" id="df_fly" viewBox="0 0 1000 420">
@@ -244,7 +244,7 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
             </svg>
             <div className="node" id="df_you">
               <div className="framed"><Monitor size={54} strokeWidth={1.5} /></div>
-              <div className="cap2"><span className="nlab">YOU</span><div className="nsub">your device</div></div>
+              <div className="cap2"><span className="nlab">YOU</span><div className="nsub">This is your device</div></div>
             </div>
             <div className="node" id="df_server">
               <div className="framed"><Server size={46} strokeWidth={1.5} /></div>
