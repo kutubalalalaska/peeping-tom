@@ -1,0 +1,34 @@
+# DEV OVERRIDE — hot reload, no image rebuilds while iterating.
+#
+# Layer this on top of any stack, e.g. the fulltest one:
+#   docker compose -f docker-compose.fulltest.yml -f docker-compose.dev.yml up
+#
+# What it does:
+#   - bind-mounts ./mirror over the baked-in copy, so backend edits land in the
+#     running container immediately
+#   - runs uvicorn with --reload (skips the entrypoint's Ollama wait/pre-pull —
+#     in dev the native Ollama is already up, and decode pulls lazily anyway)
+#
+# Frontend hot reload is NOT this file's job: run `npm run dev` in frontend/
+# (vite HMR at :5173, /api proxied to this container at :8000). The SPA baked
+# into the image still serves at :8000 but goes stale until the next rebuild —
+# use :5173 while iterating on UI.
+#
+# Rebuild is still required when: requirements.txt, Dockerfile, or entrypoint.sh
+# change, or before anything ship-shaped (prod compose does not use this file).
+services:
+  app:
+    volumes:
+      - ./mirror:/app/mirror
+      # Whisper models download from HuggingFace on first use (base ~150MB, the
+      # escalation tier large-v3-turbo ~1.6GB) — cache them across recreates.
+      - whisper-cache:/root/.cache/huggingface
+    entrypoint:
+      [
+        "uvicorn", "mirror.server:app",
+        "--host", "0.0.0.0", "--port", "8000",
+        "--reload", "--reload-dir", "/app/mirror",
+      ]
+
+volumes:
+  whisper-cache:
