@@ -58,6 +58,7 @@ services:
       MAX_INSPECT_IMAGES: "8"
       DEEP_SELECT_K: "6"
       WHISPER_MODEL: base
+      WHISPER_ESCALATE_MAX_SECONDS: "900" # tiered ASR: cap the large-v3-turbo re-run (CPU is ~realtime)
       # --- hosted tier: consent + self-destruct + abuse moat ---
       HOSTED: "1"
       EPHEMERAL: "0"
@@ -71,6 +72,9 @@ services:
       DATA_DIR: /data
     volumes:
       - mirror-data:/data
+      # Whisper models download from HF on first use (base ~150MB, the tiered-ASR
+      # escalation model large-v3-turbo ~1.6GB) — persist across recreates/updates.
+      - whisper-cache:/root/.cache/huggingface
     ports:
       - "127.0.0.1:8000:8000"             # localhost-only (for debugging on the VPS); Caddy serves the world
 
@@ -92,6 +96,7 @@ services:
 
 volumes:
   ollama-models:
+  whisper-cache:
   mirror-data:
   caddy-data:
   caddy-config:
