@@ -83,6 +83,13 @@ def _start_sweeper():
     threading.Thread(target=loop, daemon=True).start()
 
 
+@app.on_event("startup")
+def _warm_vision():
+    """Preload the decode VLM at boot (background) so the first image isn't a cold
+    load. Non-blocking + fail-open (decode.warm_up swallows errors)."""
+    threading.Thread(target=decode.warm_up, daemon=True).start()
+
+
 # Boot-time auth cache: probe each read route's key at startup so a wrong/missing key
 # fails LOUDLY in the logs here, not silently at the user's first read (Route.ready()
 # only checks that a base_url+model exist, never the key). Surfaced in /api/config.

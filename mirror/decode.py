@@ -107,6 +107,29 @@ def _vlm(img: Path, prompt: str, num_predict: int = None, model: str = None):
     return text, (time.monotonic() - t0) * 1000
 
 
+def warm_up():
+    """Preload the decode VLM into Ollama at boot so the FIRST image isn't a cold
+    load (tens of seconds on CPU). Fires a promptless /api/generate — which just
+    loads the model into memory — with the same keep_alive the real calls use.
+    Fail-open: any error just means the first image pays the load, exactly as
+    before. No-op on the mock backend."""
+    if settings.vision_backend == "mock":
+        return
+    model = settings.vision_model_fast or settings.vision_model
+    payload = {"model": model, "prompt": "", "stream": False,
+               "keep_alive": settings.ollama_keep_alive}
+    try:
+        t0 = time.monotonic()
+        req = urllib.request.Request(settings.ollama_host.rstrip("/") + "/api/generate",
+                                     data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=900) as r:   # generous: first load may pull weights
+            r.read()
+        print(f"[warmup] vision model {model} preloaded in {time.monotonic() - t0:.1f}s", flush=True)
+    except Exception as e:
+        print(f"[warmup] vision preload skipped ({model}): {e}", flush=True)
+
+
 def _prep_image(f: Path, work: Path, max_px: int = None):
     """Convert to a capped-size RGB JPEG so the VLM gets a cheap, decodable input
     (also handles webp/heic/gif and huge photos). Returns (path, resize_ms);

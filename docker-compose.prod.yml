@@ -47,12 +47,12 @@ services:
       VISION_BACKEND: ollama
       VISION_MODEL: qwen2.5vl:3b          # deep pass on CPU — 3B, NOT 7B
       VISION_MODEL_FAST: qwen2.5vl:3b     # cheap-all pass (same model = one pull)
-      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_KEEP_ALIVE: 24h              # keep the VLM warm all day (+ boot warm-up) so images don't cold-load
       READ_STREAM_REASONING: "1"           # stream GLM-5.2's real chain-of-thought to the live "thinking" view (probe-confirmed 2026-07-08)
       # --- CPU decode tuning (keep it usable on CPU) ---
       ITERATIVE_DISCOVERY: "1"            # text/audio first; only decode images the read requests
-      DECODE_MAX_PX_FAST: "512"
-      DECODE_MAX_PX: "768"
+      DECODE_MAX_PX_FAST: "384"           # lowered from 512 — fewer image tokens = faster on CPU
+      DECODE_MAX_PX: "512"                # lowered from 768 — deep pass; the main per-image speed lever on CPU
       DECODE_WORKERS: "2"
       VISION_TIMEOUT: "180"               # CPU is slow per image
       MAX_INSPECT_ROUNDS: "2"
