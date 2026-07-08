@@ -48,6 +48,7 @@ services:
       VISION_MODEL: qwen2.5vl:3b          # deep pass on CPU — 3B, NOT 7B
       VISION_MODEL_FAST: qwen2.5vl:3b     # cheap-all pass (same model = one pull)
       OLLAMA_KEEP_ALIVE: 30m
+      READ_STREAM_REASONING: "1"           # stream GLM-5.2's real chain-of-thought to the live "thinking" view (probe-confirmed 2026-07-08)
       # --- CPU decode tuning (keep it usable on CPU) ---
       ITERATIVE_DISCOVERY: "1"            # text/audio first; only decode images the read requests
       DECODE_MAX_PX_FAST: "512"
