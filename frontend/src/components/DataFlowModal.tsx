@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { getConfig } from "../api";
 import { thumb } from "../lib/ascii";
+import { useT, type TFunc } from "../lib/i18n";
 import type { ReadRoute } from "../types";
 
 interface Cfg {
@@ -17,41 +18,34 @@ interface Cfg {
   route: ReadRoute | null;
 }
 
-const CAPS = [
-  "a cartoon cat covering its face",
-  "two people at a table",
-  "a screenshot of an app",
-  "a blurred street at night",
-  "a plate of food, from above",
-  "a dog mid-jump on grass",
-];
-
 const NS = "http://www.w3.org/2000/svg";
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
 // Where the custody narration steps fire (seconds). Text is built from the live
-// config at fire-time, so the copy can never overstate what the backend does.
+// config AND the current language at fire-time, so the copy can never overstate
+// what the backend does (and stays in the reader's language).
 const FOOT_T = [0.2, 2.2, 4.2, 6.4, 8.9, 12.0, 12.9, 14.3];
-function footStep(i: number, c: Cfg): [string, string, string] {
-  const where = c.hosted ? "on the server" : "on this machine";
-  const provider = c.route?.third_party ? "openrouter" : "your vps";
-  const model = c.route?.model || "the model";
-  const ret = c.route?.zero_retention ? " — no retention" : "";
+function footStep(i: number, c: Cfg, t: TFunc): [string, string, string] {
+  const where = c.hosted ? t("df.where.server") : t("df.where.local");
+  const provider = c.route?.third_party ? "openrouter" : t("df.yourVps");
+  const model = c.route?.model || t("df.theModel");
+  const ret = c.route?.zero_retention ? t("df.noRetention") : "";
   switch (i) {
-    case 0: return ["", "this is you, with your exported chat.", ""];
-    case 1: return ["", c.hosted ? "our server comes online." : "your machine does the work.", ""];
-    case 2: return ["01", `you upload — the .zip is read ${where}.`, ""];
-    case 3: return ["02", `images are decoded ${where}. `, ""];
-    case 4: return ["03", `only the text transcript goes to ${model} via ${provider}${ret}.`, ""];
-    case 5: return ["04", "analysis complete.", "green"];
-    case 6: return ["05", "the read comes back to you.", "green"];
-    default: return ["06", "the raw images & messages are destroyed — nothing remains.", "red"];
+    case 0: return ["", t("df.foot.you"), ""];
+    case 1: return ["", c.hosted ? t("df.foot.onlineHosted") : t("df.foot.onlineLocal"), ""];
+    case 2: return ["01", t("df.foot.upload", { where }), ""];
+    case 3: return ["02", t("df.foot.decode", { where }), ""];
+    case 4: return ["03", t("df.foot.send", { model, provider, ret }), ""];
+    case 5: return ["04", t("df.foot.analysis"), "green"];
+    case 6: return ["05", t("df.foot.comeback"), "green"];
+    default: return ["06", t("df.foot.destroy"), "red"];
   }
 }
 
 // The choreographed custody animation (~16.8s loop), ported from the design
 // prototype's requestAnimationFrame logic into a React effect (cancelled on close).
 export default function DataFlowModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t, tList, lang } = useT();
   const stageRef = useRef<HTMLDivElement>(null);
   const scalerRef = useRef<HTMLDivElement>(null);
   const footRef = useRef<HTMLDivElement>(null);
@@ -121,11 +115,12 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
     // ---- carousel tiles ----
     const N = 6, tileW = 80, step = 100, center = 150, speed = 42;
     strip.innerHTML = "";
+    const caps = tList("df.caps");
     const TILES: { el: HTMLElement; pre: HTMLElement; cap: string }[] = [];
     for (let i = 0; i < N; i++) {
       const d = document.createElement("div"); d.className = "tile";
       const pre = document.createElement("pre"); pre.textContent = thumb(i * 4 + 2, 14, 7);
-      d.appendChild(pre); strip.appendChild(d); TILES.push({ el: d, pre, cap: CAPS[i % CAPS.length] });
+      d.appendChild(pre); strip.appendChild(d); TILES.push({ el: d, pre, cap: caps[i % caps.length] });
     }
     function carousel_(ep: number) {
       const move = ep * speed; let best = 1e9, bestCap = "";
@@ -207,44 +202,44 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
         } else bigimg.style.opacity = "0";
       } else { trash.style.opacity = "0"; trash.classList.remove("red"); trashlab.style.color = ""; bigimg.style.opacity = "0"; }
       let idx = 0; for (let i = 0; i < FOOT_T.length; i++) if (e >= FOOT_T[i]) idx = i;
-      const [n, text, color] = footStep(idx, cfgRef.current); const key = idx + "|" + text;
+      const [n, text, color] = footStep(idx, cfgRef.current, t); const key = idx + "|" + text;
       if (footKey !== key) { footKey = key; foot!.className = "dffoot" + (color ? " " + color : ""); foot!.innerHTML = '<span class="n">' + (n || "·") + "</span>" + text; }
       raf = requestAnimationFrame(frame);
     }
     fit(); layout(); t0 = performance.now(); raf = requestAnimationFrame(frame);
 
     return () => { active = false; cancelAnimationFrame(raf); window.removeEventListener("resize", fit); };
-  }, [open]);
+  }, [open, lang]);
 
   if (!open) return null;
-  const serverLab = cfg.hosted ? "OUR SERVER" : "YOUR MACHINE";
-  const serverSub = cfg.hosted ? "our website" : "local";
-  const orLab = cfg.route?.third_party ? "OPENROUTER" : "YOUR VPS";
-  const orSub = (cfg.route?.model || "llm") + (cfg.route?.zero_retention ? " · no retention" : "");
-  const where = cfg.hosted ? "on our server" : "on your machine";
+  const serverLab = cfg.hosted ? t("df.serverHosted") : t("df.serverLocal");
+  const serverSub = cfg.hosted ? t("df.serverSubHosted") : t("df.serverSubLocal");
+  const orLab = cfg.route?.third_party ? "OPENROUTER" : t("df.orVps");
+  const orSub = (cfg.route?.model || t("df.llm")) + (cfg.route?.zero_retention ? t("df.noRetentionSub") : "");
+  const where = cfg.hosted ? t("df.whereClab.server") : t("df.whereClab.local");
 
   return (
     <div className="modal open df-modal" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modalcard">
         <div className="modalhead">
-          <span>how your data is processed</span>
+          <span>{t("df.head")}</span>
           <button className="modalx" onClick={onClose}>[ esc ]</button>
         </div>
-        <div className="df-h1">Here is how we proceed your data</div>
+        <div className="df-h1">{t("df.h1")}</div>
         <div ref={scalerRef} id="df_scaler">
           <div ref={stageRef} id="df_stage">
             <svg className="fly" id="df_fly" viewBox="0 0 1000 420">
               <path className="lane" id="df_laneTop" d="" />
               <path className="lane" id="df_laneBot" d="" />
-              <text className="laneLab" id="df_labTop" textAnchor="middle">messages →</text>
-              <text className="laneLab" id="df_labBot" textAnchor="middle">← transcript</text>
+              <text className="laneLab" id="df_labTop" textAnchor="middle">{t("df.laneMessages")}</text>
+              <text className="laneLab" id="df_labBot" textAnchor="middle">{t("df.laneTranscript")}</text>
               <g id="df_bits" />
               <path id="df_arcZip" d="" fill="none" stroke="none" />
               <path id="df_arcDoc" d="" fill="none" stroke="none" />
             </svg>
             <div className="node" id="df_you">
               <div className="framed"><Monitor size={54} strokeWidth={1.5} /></div>
-              <div className="cap2"><span className="nlab">YOU</span><div className="nsub">This is your device</div></div>
+              <div className="cap2"><span className="nlab">{t("df.you")}</span><div className="nsub">{t("df.youSub")}</div></div>
             </div>
             <div className="node" id="df_server">
               <div className="framed"><Server size={46} strokeWidth={1.5} /></div>
@@ -252,7 +247,7 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
             </div>
             <div id="df_prog" />
             <div id="df_carousel">
-              <div className="clab">parsing images · stays {where}</div>
+              <div className="clab">{t("df.clab", { where })}</div>
               <div className="strip" id="df_strip" />
               <div className="clabel" id="df_clabel" />
             </div>
@@ -265,10 +260,10 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
             </div>
             <div id="df_trash">
               <Trash2 size={46} strokeWidth={1.6} />
-              <div className="nsub" id="df_trashlab" style={{ marginTop: "6px" }}>images + messages<br />destroyed</div>
+              <div className="nsub" id="df_trashlab" style={{ marginTop: "6px" }}>{t("df.trashLabel1")}<br />{t("df.trashLabel2")}</div>
             </div>
             <div className="flyobj" id="df_zip"><FileArchive size={42} strokeWidth={1.5} /><div className="objlab">.zip</div></div>
-            <div className="flyobj" id="df_doc"><FileText size={42} strokeWidth={1.5} /><div className="objlab">read</div></div>
+            <div className="flyobj" id="df_doc"><FileText size={42} strokeWidth={1.5} /><div className="objlab">{t("df.readObj")}</div></div>
             <div className="flyobj" id="df_bigimg"><ImageIcon size={62} strokeWidth={1.4} /></div>
           </div>
         </div>
