@@ -24,7 +24,10 @@ jobs/
 # --- internal docs: held until a polished public release ---
 #     (NOTE: mirror/soul.md is the read's system prompt = app code — kept on purpose)
 #     (a short stub README.md IS published; the detailed draft lives in README.dev.md)
+#     (DEPLOY.md is the operator runbook for the hosted exhibit — kept private;
+#      the repo is public but the deployment/iteration notes are not)
 /README.dev.md
 /READ_ROUTES.md
 /BACK_HALF_PLAN.md
 /SCALING.md
+/DEPLOY.md

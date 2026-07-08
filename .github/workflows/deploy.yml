@@ -1,0 +1,50 @@
+name: deploy-prod
+
+# Auto-deploy the hosted "exhibit" to the CPU VPS on every push to main.
+#
+# One-time setup:
+#   1. Repo -> Settings -> Secrets and variables -> Actions -> add:
+#        VPS_HOST     the VPS IP (or domain)
+#        VPS_USER     the SSH user (e.g. root, or a deploy user in the docker group)
+#        VPS_SSH_KEY  a PRIVATE key dedicated to CI (its PUBLIC half goes in the
+#                     VPS user's ~/.ssh/authorized_keys)
+#        VPS_PORT     (optional) SSH port, defaults to 22
+#   2. Bootstrap the VPS ONCE: clone into ~/immovable-object-part-1, write .env,
+#      and run the first `docker compose -f docker-compose.prod.yml up -d --build`.
+#
+# After that, each push to main rebuilds + restarts the stack on the box. Repo
+# secrets are never exposed to fork pull requests -- this runs only on push to
+# main and manual dispatch, both of which require write access.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # never interrupt a build/deploy midway
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH (pull + rebuild on the VPS)
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_HOST:-}" ]; then
+            echo "::error::VPS_HOST not set. Add VPS_HOST / VPS_USER / VPS_SSH_KEY in Settings -> Secrets -> Actions, then re-run."
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
+            -o StrictHostKeyChecking=accept-new \
+            "$VPS_USER@$VPS_HOST" \
+            'set -e; cd ~/immovable-object-part-1/mirror-app; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker image prune -f; docker compose -f docker-compose.prod.yml ps'
