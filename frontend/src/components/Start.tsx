@@ -83,7 +83,11 @@ export default function Start() {
 
   if (!platform) {
     return (
-      <Frame step="step 1/4 · platform" hero="select the platform">
+      <Frame
+        step="step 1/4 · platform"
+        hero="select the platform"
+        nav={<button onClick={() => nav("/")}>[ ← back ]</button>}
+      >
         <div className="ln">
           <div className="row">
             <button className="opt" onClick={() => setPlatform("whatsapp")}>
