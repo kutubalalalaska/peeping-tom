@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getStatus } from "../api";
 import type { JobStatus, RecentItem } from "../types";
@@ -71,73 +71,53 @@ function Carousel({ recent, sf, label }: { recent: RecentItem[]; sf: number; lab
   );
 }
 
-// Strip the tool-only INSPECT line and the [#id] citations (resolved into quote
-// blocks later, in Result) so the streaming read reads as clean prose.
-const tidy = (t: string) =>
-  t.replace(/INSPECT\s*=\s*\[[^\]]*\]?/i, "").replace(/(?:\s*\[#\d+\])+/g, "");
-
-// The read as it streams in (status.partial_read): the same chapter/teaser shape
-// Result uses, with a caret at the end. Citations resolve on the result page.
-function LiveRead({ text }: { text: string }) {
-  const sections: { title: string | null; body: string }[] = [{ title: null, body: "" }];
-  tidy(text)
-    .split("\n")
-    .forEach((line) => {
-      const h = line.match(/^\s*##\s+(.*\S)\s*$/);
-      if (h) sections.push({ title: h[1].trim(), body: "" });
-      else sections[sections.length - 1].body += line + "\n";
-    });
-  const out: ReactNode[] = [];
-  sections.forEach((sec, si) => {
-    if (sec.title) out.push(<h2 className="chapter" key={"h" + si}>{sec.title}</h2>);
-    sec.body.split(/\n\n+/).forEach((para, pi) => {
-      const p = para.trim();
-      if (p) {
-        out.push(
-          <p key={"p" + si + "_" + pi} className={si === 0 && !sec.title ? "teaser" : ""}>
-            {p}
-          </p>
-        );
-      }
-    });
-  });
-  return (
-    <div className="read">
-      {out}
-      <span className="cur" />
-    </div>
-  );
-}
-
 // The model's live "thinking" view (status.partial_thinking) — its process, not
-// the finished prose. Shows honest motion during the wait instead of replaying a
-// done read for effect. Handles both shapes the backend may send: a few short
-// working-lines (NOTE-derived) or a longer raw reasoning stream — we render the
-// tail either way so it stays compact.
-function ThinkingTicker({ text, sf }: { text: string; sf: number }) {
+// the finished prose. This is deliberately the STAR of the analyzing screen: the
+// finished read is NOT streamed here (it would spoil the reveal on the Result
+// page). Handles both shapes the backend may send: a few short working-lines
+// (NOTE-derived) or a longer raw reasoning stream — we render the tail either way
+// so it stays compact. `label` retitles it (e.g. "composing…") and `live` toggles
+// the caret (off once the model has stopped thinking and is writing the read).
+function ThinkingTicker({
+  text,
+  sf,
+  label,
+  live = true,
+}: {
+  text: string;
+  sf: number;
+  label?: string;
+  live?: boolean;
+}) {
   const { t } = useT();
   const spin = SPIN[sf % SPIN.length];
   const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   const asList = lines.length >= 2;
-  const view = asList ? lines.slice(-5) : [text.length > 280 ? "…" + text.slice(-280) : text];
+  const view = asList
+    ? lines.slice(-5)
+    : lines.length
+    ? [text.length > 280 ? "…" + text.slice(-280) : text.trim()]
+    : [];
   return (
     <div className="thinking">
-      <div className="th-head">{spin}&nbsp;&nbsp;{t("insp.thinking")}</div>
-      <div className="th-lines">
-        {view.map((l, i) => {
-          const last = i === view.length - 1;
-          return (
-            <div
-              key={i}
-              className={"th-line" + (last ? " active" : "")}
-              style={asList ? { opacity: 0.35 + 0.65 * ((i + 1) / view.length) } : undefined}
-            >
-              {l}
-              {last && <span className="th-cur" />}
-            </div>
-          );
-        })}
-      </div>
+      <div className="th-head">{spin}&nbsp;&nbsp;{label ?? t("insp.thinking")}</div>
+      {view.length > 0 && (
+        <div className="th-lines">
+          {view.map((l, i) => {
+            const last = i === view.length - 1;
+            return (
+              <div
+                key={i}
+                className={"th-line" + (last && live ? " active" : "")}
+                style={asList ? { opacity: 0.35 + 0.65 * ((i + 1) / view.length) } : undefined}
+              >
+                {l}
+                {last && live && <span className="th-cur" />}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -199,37 +179,40 @@ export default function Inspection() {
   // status.message: reading the chat, opening the photos it flagged (the relocated
   // media spectacle), then re-reading with them in view.
   if (state === "analyzing") {
-    // `rawMsg` is the backend's own status line (still English — see i18n phase 2);
-    // it drives the deep-look detection below, so read it before falling back.
+    // The FINAL read is deliberately NOT streamed here — it's the reveal on the
+    // Result page. We show the model's live *process* (partial_thinking) as the
+    // star, and switch to a spoiler-free "composing…" recap once it starts writing.
     const rawMsg = s?.message;
     const msg = rawMsg ?? t("insp.readingFallback");
     const thinking = s?.partial_thinking?.trim();
-    const partial = s?.partial_read?.trim();
-    // The deep-look sub-phase. The backend leaves partial_read holding the prior
-    // read while it opens images, so the carousel (the relocated media spectacle)
-    // must win over the stale partial here.
+    const started = !!s?.partial_read?.trim(); // the read is being written (hidden)
+    const tier = s?.plan?.tier ?? 1;
+    // Deep-look sub-phase: the read asked to INSPECT some images.
     const opening = /opening/i.test(rawMsg ?? "");
     const imgs = recent.filter((it) => it.type !== "audio");
     const showCarousel = opening && imgs.length > 0;
-    const showRead = !showCarousel && !!partial;
-    // Honest motion while we wait: the model's live thinking shows first, and the
-    // read takes over the moment it actually starts writing.
-    const showThinking = !showCarousel && !showRead && !!thinking;
+    // "composing" = the read is being written with no live thinking left to show.
+    // One-shot: the moment the read body streams. Map-reduce: only during the final
+    // synthesis — while reading eras, partial_thinking ("reading era i/N") IS live.
+    const synthesising = /synth/i.test(rawMsg ?? "");
+    const composing = !showCarousel && (tier >= 3 ? synthesising : started);
+    const showThinking = !showCarousel && !composing && !!thinking;
     const tips = tList("insp.tips");
     const tip = tips[Math.floor(sf / 70) % tips.length]; // ~5s each
     return (
       <Frame
         step={t("insp.step4")}
         hero={showCarousel ? t("insp.openingPhotos") : t("insp.readingChat")}
-        top={showRead}
       >
         {showCarousel ? (
           <Carousel recent={imgs} sf={sf} label={t("insp.justOpened")} />
-        ) : showRead ? (
-          <LiveRead text={partial!} />
         ) : showThinking ? (
           <div className="pcontent">
             <ThinkingTicker text={thinking!} sf={sf} />
+          </div>
+        ) : composing ? (
+          <div className="pcontent">
+            <ThinkingTicker text={thinking ?? ""} sf={sf} label={t("insp.composing")} live={false} />
           </div>
         ) : (
           <div className="pcontent">

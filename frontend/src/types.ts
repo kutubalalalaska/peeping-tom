@@ -56,6 +56,7 @@ export interface JobStatus {
   recent?: RecentItem[];
   partial_read?: string;       // the analysis, streaming in token-by-token (during `analyzing`)
   partial_thinking?: string;   // the model's live "thinking" view — process, not prose (during `analyzing`)
+  plan?: { tier: number; chunks?: number; form?: string; est_tokens?: number; script?: string };
   stats?: Stats;
   frontier_ready?: boolean;
   deletion?: Deletion | null;
