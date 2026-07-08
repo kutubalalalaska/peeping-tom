@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadChat, getConfig } from "../api";
 import { useT } from "../lib/i18n";
+import { detectOS, isMobileOS } from "../lib/platform";
 import Frame from "./Frame";
 
 // Pull a human message out of a thrown api error ("429 {\"detail\":\"…\"}"). The
@@ -20,8 +21,12 @@ type OS = "iphone" | "android";
 // steps in the dictionary send people specifically to the desktop build.
 
 export default function Start() {
+  // Detect the CURRENT device once — it drives the export guidance (the .zip
+  // handoff differs per device, and Telegram can't export on a phone at all).
+  const [detectedOS] = useState(detectOS);
+  const onMobile = isMobileOS(detectedOS);
   const [platform, setPlatform] = useState<Platform | null>(null);
-  const [os, setOs] = useState<OS>("iphone");
+  const [os, setOs] = useState<OS>(detectedOS === "android" ? "android" : "iphone");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -66,6 +71,7 @@ export default function Start() {
               [ telegram ]
             </button>
           </div>
+          {onMobile && <div className="mobilehint">{t("start.mobileHint")}</div>}
         </div>
       </Frame>
     );
@@ -75,6 +81,18 @@ export default function Start() {
     platform === "telegram"
       ? tList("start.tg")
       : tList(os === "iphone" ? "start.wa.iphone" : "start.wa.android");
+  // Device-aware .zip handoff. Telegram export is desktop-only, so its zip is made
+  // right here → the generic "drop it below". WhatsApp is exported on a phone, so the
+  // line explains getting that .zip into THIS device (same phone, or a computer).
+  const handoffKey =
+    platform === "telegram"
+      ? "start.thenDrop"
+      : detectedOS === "ios"
+      ? "start.handoff.ios"
+      : detectedOS === "android"
+      ? "start.handoff.android"
+      : "start.handoff.desktop";
+  const tgMobile = platform === "telegram" && onMobile;
 
   return (
     <Frame
@@ -82,6 +100,14 @@ export default function Start() {
       hero={t("start.exportFrom", { platform })}
       nav={<button onClick={() => setPlatform(null)}>{t("common.back")}</button>}
     >
+      {tgMobile && (
+        <div className="ln">
+          <div className="notice">
+            <strong>{t("start.tgMobile.title")}</strong>
+            {t("start.tgMobile.body")}
+          </div>
+        </div>
+      )}
       <form onSubmit={submit}>
         {platform === "whatsapp" && (
           <div className="ln">
@@ -110,7 +136,7 @@ export default function Start() {
                 {i + 1} · {st}
               </div>
             ))}
-            <div>{t("start.thenDrop")}</div>
+            <div>{t(handoffKey)}</div>
           </div>
         </div>
         <div className="ln" style={{ animationDelay: "160ms" }}>

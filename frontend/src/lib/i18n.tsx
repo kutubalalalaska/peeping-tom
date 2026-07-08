@@ -50,15 +50,24 @@ const en = {
     "open the chat in whatsapp.",
     "tap the contact / group name at the top.",
     "scroll down → “export chat”.",
-    "choose “attach media”.",
-    "save the .zip to files, or airdrop it here.",
+    "choose “attach media” — whatsapp makes a .zip.",
   ],
   "start.wa.android": [
     "open the chat in whatsapp.",
     "tap ⋮ (top-right) → more → “export chat”.",
-    "choose “include media”.",
-    "send the .zip to yourself, download it here.",
+    "choose “include media” — whatsapp makes a .zip.",
   ],
+  "start.mobileHint":
+    "on a phone this is a couple of extra taps — it's smoothest on a computer, but it works here too.",
+  "start.handoff.ios":
+    "in the share sheet, tap “Save to Files”, then tap “choose .zip” below and pick that file.",
+  "start.handoff.android":
+    "save the .zip to Files or Downloads, then tap “choose .zip” below and pick it.",
+  "start.handoff.desktop":
+    "exported on your phone? airdrop, email, or save the .zip to this computer — then choose it below.",
+  "start.tgMobile.title": "you'll need a computer for telegram",
+  "start.tgMobile.body":
+    "telegram only exports chats from Telegram Desktop — it can't be done on a phone. open peeping-tom.com on a laptop or desktop, or pick a whatsapp chat instead.",
   "start.tg": [
     "use telegram desktop from desktop.telegram.org — only this build does the JSON export.",
     "open the chat → ⋮ → “export chat history”.",
@@ -228,15 +237,24 @@ const ru: Dict = {
     "откройте чат в whatsapp.",
     "нажмите на имя контакта / группы вверху.",
     "прокрутите вниз → «экспорт чата».",
-    "выберите «прикрепить медиа».",
-    "сохраните .zip в файлы или отправьте сюда через airdrop.",
+    "выберите «прикрепить медиа» — whatsapp создаст .zip.",
   ],
   "start.wa.android": [
     "откройте чат в whatsapp.",
     "нажмите ⋮ (вверху справа) → ещё → «экспорт чата».",
-    "выберите «добавить медиа».",
-    "отправьте .zip себе и скачайте его здесь.",
+    "выберите «добавить медиа» — whatsapp создаст .zip.",
   ],
+  "start.mobileHint":
+    "на телефоне это пара лишних шагов — удобнее на компьютере, но и здесь работает.",
+  "start.handoff.ios":
+    "в меню «Поделиться» нажмите «Сохранить в Файлы», затем нажмите «выбрать .zip» ниже и выберите этот файл.",
+  "start.handoff.android":
+    "сохраните .zip в Файлы или Загрузки, затем нажмите «выбрать .zip» ниже и выберите его.",
+  "start.handoff.desktop":
+    "экспортировали на телефоне? перешлите .zip на этот компьютер (airdrop, почта, диск) — затем выберите его ниже.",
+  "start.tgMobile.title": "для telegram понадобится компьютер",
+  "start.tgMobile.body":
+    "telegram экспортирует чаты только из Telegram Desktop — на телефоне это невозможно. откройте peeping-tom.com на ноутбуке или компьютере, либо выберите чат whatsapp.",
   "start.tg": [
     "используйте telegram desktop с desktop.telegram.org — только эта версия делает экспорт в JSON.",
     "откройте чат → ⋮ → «экспортировать историю чата».",
@@ -404,15 +422,24 @@ const it: Dict = {
     "apri la chat in whatsapp.",
     "tocca il nome del contatto / gruppo in alto.",
     "scorri in basso → «esporta chat».",
-    "scegli «allega media».",
-    "salva lo .zip nei file, o invialo qui via airdrop.",
+    "scegli «allega media» — whatsapp crea uno .zip.",
   ],
   "start.wa.android": [
     "apri la chat in whatsapp.",
     "tocca ⋮ (in alto a destra) → altro → «esporta chat».",
-    "scegli «includi media».",
-    "invia lo .zip a te stesso, scaricalo qui.",
+    "scegli «includi media» — whatsapp crea uno .zip.",
   ],
+  "start.mobileHint":
+    "sul telefono servono un paio di tocchi in più — è più comodo su un computer, ma funziona anche qui.",
+  "start.handoff.ios":
+    "nel menu di condivisione tocca «Salva su File», poi tocca «scegli .zip» qui sotto e seleziona quel file.",
+  "start.handoff.android":
+    "salva lo .zip in File o Download, poi tocca «scegli .zip» qui sotto e selezionalo.",
+  "start.handoff.desktop":
+    "esportato dal telefono? invia lo .zip a questo computer (airdrop, email, drive) — poi sceglilo qui sotto.",
+  "start.tgMobile.title": "per telegram serve un computer",
+  "start.tgMobile.body":
+    "telegram esporta le chat solo da Telegram Desktop — non si può fare dal telefono. apri peeping-tom.com su un laptop o desktop, oppure scegli una chat whatsapp.",
   "start.tg": [
     "usa telegram desktop da desktop.telegram.org — solo questa versione fa l’esportazione JSON.",
     "apri la chat → ⋮ → «esporta cronologia chat».",
