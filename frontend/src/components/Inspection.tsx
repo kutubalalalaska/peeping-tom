@@ -222,7 +222,6 @@ export default function Inspection() {
         step={t("insp.step4")}
         hero={showCarousel ? t("insp.openingPhotos") : t("insp.readingChat")}
         top={showRead}
-        custody={t("insp.custodyAnalyzing")}
       >
         {showCarousel ? (
           <Carousel recent={imgs} sf={sf} label={t("insp.justOpened")} />

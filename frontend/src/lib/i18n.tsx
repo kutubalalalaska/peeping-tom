@@ -89,8 +89,6 @@ const en = {
   "insp.readingFallback": "the model is reading the transcript…",
   "insp.openingPhotos": "opening the photos it flagged",
   "insp.readingChat": "reading your chat",
-  "insp.custodyAnalyzing":
-    "✓ raw media stays local · only the transcript crossed",
   "insp.justOpened": "just opened",
   "insp.justDecoded": "just decoded",
   "insp.thinking": "thinking…",
@@ -106,19 +104,14 @@ const en = {
   "insp.phaseTranscribe": "transcribe",
   "insp.parsingShort": "parsing…",
   "insp.tips": [
-    "the model reads what's implicit — not just what you said.",
-    "only the text transcript crossed. your photos never left this machine.",
-    "patterns surface across time, not in any single message.",
-    "every claim comes back with the exact messages behind it.",
+    "the model reads what's implicit",
+    "patterns surface across time",
     "a long history can take a few minutes to read.",
   ],
   "insp.etaLeft": "~{eta} left",
 
   "result.loadingHero": "loading the read",
   "result.hero": "the read",
-  "result.custodyKeep":
-    "✓ raw media stays local · the read is yours to keep or destroy",
-  "result.custodyNothing": "✓ nothing remains",
   "result.destroyedHero": "self-destructed",
   "result.destroyedBody": [
     "this read has self-destructed.",
@@ -150,7 +143,7 @@ const en = {
   "result.heldNone": "—",
   "result.nukeBtn": "nuke all my data",
   "result.nukeSub":
-    "deletes the transcript, the read, everything — no copy is kept",
+    "deletes all your data",
   "result.nukeSteps": [
     "> nuke --all",
     "purging raw media ........ gone",
@@ -158,7 +151,7 @@ const en = {
     "purging the read ......... gone",
     "purging this session ..... gone",
     "",
-    "✓ nothing remains. starting over…",
+    "Your data is deleted. starting over…",
   ],
 
   // DataFlowModal — the custody-animation explainer
@@ -289,8 +282,6 @@ const ru: Dict = {
   "insp.readingFallback": "модель читает транскрипт…",
   "insp.openingPhotos": "открываю отмеченные фото",
   "insp.readingChat": "читаю ваш чат",
-  "insp.custodyAnalyzing":
-    "✓ исходные медиа остаются локально · передан только транскрипт",
   "insp.justOpened": "только что открыто",
   "insp.justDecoded": "только что декодировано",
   "insp.thinking": "думаю…",
@@ -307,19 +298,14 @@ const ru: Dict = {
   "insp.phaseTranscribe": "расшифровка",
   "insp.parsingShort": "разбор…",
   "insp.tips": [
-    "модель читает то, что подразумевается, — а не только сказанное.",
-    "передан только текстовый транскрипт. ваши фото не покидали эту машину.",
-    "закономерности проявляются во времени, а не в отдельном сообщении.",
-    "каждое утверждение возвращается с конкретными сообщениями за ним.",
+    "модель читает то, что подразумевается",
+    "закономерности проявляются во времени",
     "долгую историю модель может читать несколько минут.",
   ],
   "insp.etaLeft": "~{eta} осталось",
 
   "result.loadingHero": "загружаю разбор",
   "result.hero": "разбор",
-  "result.custodyKeep":
-    "✓ исходные медиа остаются локально · разбор ваш — сохраните или удалите",
-  "result.custodyNothing": "✓ ничего не осталось",
   "result.destroyedHero": "самоуничтожен",
   "result.destroyedBody": [
     "этот разбор самоуничтожился.",
@@ -350,8 +336,7 @@ const ru: Dict = {
   "result.heldRead": "разбор",
   "result.heldNone": "—",
   "result.nukeBtn": "уничтожить все мои данные",
-  "result.nukeSub":
-    "удаляет транскрипт, разбор, всё — ни одной копии не остаётся",
+  "result.nukeSub": "удаляет все ваши данные",
   "result.nukeSteps": [
     "> nuke --all",
     "удаляю исходные медиа .... готово",
@@ -359,7 +344,7 @@ const ru: Dict = {
     "удаляю разбор ............ готово",
     "удаляю эту сессию ........ готово",
     "",
-    "✓ ничего не осталось. начинаю заново…",
+    "Ваши данные удалены. начинаю заново…",
   ],
 
   // DataFlowModal — the custody-animation explainer
@@ -486,8 +471,6 @@ const it: Dict = {
   "insp.readingFallback": "il modello sta leggendo la trascrizione…",
   "insp.openingPhotos": "apro le foto segnalate",
   "insp.readingChat": "sto leggendo la tua chat",
-  "insp.custodyAnalyzing":
-    "✓ i media originali restano in locale · è passata solo la trascrizione",
   "insp.justOpened": "appena aperto",
   "insp.justDecoded": "appena decodificato",
   "insp.thinking": "sto pensando…",
@@ -504,19 +487,14 @@ const it: Dict = {
   "insp.phaseTranscribe": "trascrizione",
   "insp.parsingShort": "analisi…",
   "insp.tips": [
-    "il modello legge ciò che è implicito — non solo ciò che hai detto.",
-    "è passata solo la trascrizione testuale. le tue foto non hanno mai lasciato questa macchina.",
-    "gli schemi emergono nel tempo, non in un singolo messaggio.",
-    "ogni affermazione torna con i messaggi esatti che la sostengono.",
+    "il modello legge ciò che è implicito",
+    "gli schemi emergono nel tempo",
     "una storia lunga può richiedere qualche minuto di lettura.",
   ],
   "insp.etaLeft": "~{eta} rimasti",
 
   "result.loadingHero": "sto caricando la lettura",
   "result.hero": "la lettura",
-  "result.custodyKeep":
-    "✓ i media originali restano in locale · la lettura è tua, da tenere o distruggere",
-  "result.custodyNothing": "✓ non resta nulla",
   "result.destroyedHero": "autodistrutta",
   "result.destroyedBody": [
     "questa lettura si è autodistrutta.",
@@ -547,8 +525,7 @@ const it: Dict = {
   "result.heldRead": "la lettura",
   "result.heldNone": "—",
   "result.nukeBtn": "distruggi tutti i miei dati",
-  "result.nukeSub":
-    "elimina la trascrizione, la lettura, tutto — nessuna copia viene conservata",
+  "result.nukeSub": "elimina tutti i tuoi dati",
   "result.nukeSteps": [
     "> nuke --all",
     "elimino i media originali . fatto",
@@ -556,7 +533,7 @@ const it: Dict = {
     "elimino la lettura ....... fatto",
     "elimino questa sessione .. fatto",
     "",
-    "✓ non resta nulla. ricomincio…",
+    "I tuoi dati sono eliminati. ricomincio…",
   ],
 
   // DataFlowModal — the custody-animation explainer

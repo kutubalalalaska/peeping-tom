@@ -213,7 +213,7 @@ export default function Result() {
 
   if (destroyed && !nuked) {
     return (
-      <Frame step={t("insp.step4")} hero={t("result.destroyedHero")} custody={t("result.custodyNothing")}>
+      <Frame step={t("insp.step4")} hero={t("result.destroyedHero")}>
         <pre className="receipt">{tList("result.destroyedBody").join("\n")}</pre>
         <button className="nuke" onClick={() => nav("/")}>
           {t("result.startOver")}
@@ -228,7 +228,6 @@ export default function Result() {
       step={t("insp.step4")}
       hero={t("result.hero")}
       top
-      custody={nuked ? t("result.custodyNothing") : t("result.custodyKeep")}
     >
       {remaining !== null && !nuked && (
         <div className={"selfdestruct" + (remaining <= 60 ? " urgent" : "")}>
