@@ -31,7 +31,7 @@ HERE = Path(__file__).parent
 WEB = Path(settings.web_dir) if settings.web_dir else None
 SPA = bool(WEB and (WEB / "index.html").exists())
 
-app = FastAPI(title="Inward Mirror")
+app = FastAPI(title="Drop 001: Peeping Tom")
 
 # Resumable chunked-upload routes (mirror/uploads.py). Registered here, BEFORE the
 # SPA catch-all below, so GET /api/upload/{id}/offset isn't shadowed by it.
