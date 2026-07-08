@@ -202,6 +202,17 @@ const en = {
   "df.foot.analysis": "analysis complete.",
   "df.foot.comeback": "the read comes back to you.",
   "df.foot.destroy": "the raw images & messages are destroyed — nothing remains.",
+
+  // chat bubble + context drawer
+  "bubble.blindCaption": "— blind caption",
+  "bubble.openInChat": "open in chat",
+  "drawer.title": "your chat",
+  "drawer.close": "close",
+  "drawer.loading": "loading the chat…",
+  "drawer.deleted": "this chat is no longer available — it was deleted.",
+  "drawer.earlier": "↑ earlier messages",
+  "drawer.later": "↓ later messages",
+  "drawer.notFound": "message not found",
 };
 
 export type MsgKey = keyof typeof en;
@@ -391,6 +402,17 @@ const ru: Dict = {
   "df.foot.analysis": "анализ завершён.",
   "df.foot.comeback": "разбор возвращается к вам.",
   "df.foot.destroy": "исходные изображения и сообщения уничтожаются — ничего не остаётся.",
+
+  // chat bubble + context drawer
+  "bubble.blindCaption": "— слепая подпись",
+  "bubble.openInChat": "открыть в чате",
+  "drawer.title": "ваш чат",
+  "drawer.close": "закрыть",
+  "drawer.loading": "загружаю чат…",
+  "drawer.deleted": "этот чат больше недоступен — он был удалён.",
+  "drawer.earlier": "↑ более ранние сообщения",
+  "drawer.later": "↓ более поздние сообщения",
+  "drawer.notFound": "сообщение не найдено",
 };
 
 const it: Dict = {
@@ -576,6 +598,17 @@ const it: Dict = {
   "df.foot.analysis": "analisi completata.",
   "df.foot.comeback": "la lettura torna a te.",
   "df.foot.destroy": "le immagini e i messaggi originali vengono distrutti — non resta nulla.",
+
+  // chat bubble + context drawer
+  "bubble.blindCaption": "— didascalia alla cieca",
+  "bubble.openInChat": "apri nella chat",
+  "drawer.title": "la tua chat",
+  "drawer.close": "chiudi",
+  "drawer.loading": "sto caricando la chat…",
+  "drawer.deleted": "questa chat non è più disponibile — è stata eliminata.",
+  "drawer.earlier": "↑ messaggi precedenti",
+  "drawer.later": "↓ messaggi successivi",
+  "drawer.notFound": "messaggio non trovato",
 };
 
 const DICT: Record<Lang, Dict> = { en, ru, it };

@@ -297,3 +297,58 @@ button { font: inherit; cursor: pointer; }
   .read p { font-size: 15px; }
   .foot { font-size: 11px; }
 }
+
+/* ---- citation chips (long runs / unresolved refs) ---- */
+.cite {
+  display: inline-block; font: inherit; font-size: 12px; line-height: 1.4;
+  background: none; border: 1px solid var(--placeholder); border-radius: 10px;
+  color: var(--secondary); padding: 0 8px; margin: 0 4px 4px 0; cursor: pointer;
+  letter-spacing: .02em; vertical-align: baseline;
+}
+.cite:hover { border-color: var(--ink); color: var(--ink); }
+.cite.dead { cursor: default; color: var(--placeholder); border-color: var(--hairline); }
+
+/* ---- clickable bubbles + the focused (cited) one ---- */
+.bubble.clickable { cursor: pointer; }
+.bubble.clickable:hover { border-color: var(--ink); }
+.bubble.me.clickable:hover { border-color: #fff; }
+.bubble .b-open { color: var(--muted); opacity: 0; transition: opacity .12s; }
+.bubble.me .b-open { color: rgba(255,255,255,.6); }
+.bubble.clickable:hover .b-open, .bubble.clickable:focus-visible .b-open { opacity: 1; }
+.bubble.focus { outline: 2px solid var(--ink); outline-offset: 2px; animation: citeflash 1.4s ease-out 1; }
+@keyframes citeflash {
+  0% { box-shadow: 0 0 0 6px var(--flash); }
+  100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* ---- context drawer: the full chat, opened at a cited message ---- */
+.drawer-wrap {
+  position: fixed; inset: 0; z-index: 70; background: rgba(10,10,10,.16);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+  display: flex; justify-content: flex-end;
+}
+.drawer-wrap.open { opacity: 1; pointer-events: auto; }
+.drawer {
+  width: min(460px, 100%); height: 100%; background: var(--paper);
+  border-left: 1px solid var(--ink); display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .24s ease;
+}
+.drawer-wrap.open .drawer { transform: translateX(0); }
+.drawer-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 16px 18px; border-bottom: 1px solid var(--hairline);
+  font-size: 12px; letter-spacing: .04em; color: var(--muted);
+}
+.drawer-body {
+  flex: 1; overflow-y: auto; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.drawer-msg { color: var(--secondary); font-size: 13px; text-align: center; margin-top: 40px; }
+.drawer-more {
+  align-self: center; margin: 8px 0; background: none; border: 1px solid var(--placeholder);
+  color: var(--secondary); font: inherit; font-size: 11.5px; padding: 6px 12px; cursor: pointer;
+}
+.drawer-more:hover { border-color: var(--ink); color: var(--ink); }
+@media (max-width: 620px) {
+  .drawer { width: 100%; border-left: none; }
+}

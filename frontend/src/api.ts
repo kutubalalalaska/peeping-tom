@@ -60,6 +60,11 @@ export const getMessages = async (id: string, ids: number[]) =>
     await fetch(`/api/jobs/${id}/messages?ids=${ids.join(",")}`)
   );
 
+// The WHOLE chat (no ids filter) — powers the context drawer. May be large; the
+// caller windows the render. 404s once the chat is purged (ephemeral / after TTL).
+export const getAllMessages = async (id: string) =>
+  asJson<ReceiptMessage[]>(await fetch(`/api/jobs/${id}/messages`));
+
 export const getRetained = async (id: string) =>
   asJson<Retained>(await fetch(`/api/jobs/${id}/retained`));
 

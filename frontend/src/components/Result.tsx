@@ -1,31 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getResult, getRetained, getMessages, deleteJob, transcriptUrl, mediaUrl } from "../api";
-import type { ReadResult, Retained, ReceiptMessage, ReceiptMedia } from "../types";
+import { getResult, getRetained, getMessages, deleteJob, transcriptUrl } from "../api";
+import type { ReadResult, Retained, ReceiptMessage } from "../types";
 import Frame from "./Frame";
-import { seedOf, thumb, wave } from "../lib/ascii";
 import { useT } from "../lib/i18n";
-
-// Stable left/right side per actor: distinct senders are ordered by first
-// appearance and alternated, so each person sits consistently on one side across
-// the whole read (a two-sided chat shape). Which side is "you" is a v2 concern —
-// for now it's just the two actors, split.
-function sidesOf(msgs: Record<number, ReceiptMessage>): Record<string, "me" | "them"> {
-  const first: Record<string, number> = {};
-  Object.values(msgs).forEach((m) => {
-    if (first[m.sender] === undefined || m.id < first[m.sender]) first[m.sender] = m.id;
-  });
-  const map: Record<string, "me" | "them"> = {};
-  Object.keys(first)
-    .sort((a, b) => first[a] - first[b])
-    .forEach((name, i) => (map[name] = i % 2 === 0 ? "them" : "me"));
-  return map;
-}
-
-const fmt = (s: number) => {
-  if (!isFinite(s) || s < 0) s = 0;
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-};
+import { Bubble, sidesOf } from "./Bubbles";
+import ChatDrawer from "./ChatDrawer";
 
 // H:MM:SS when over an hour, else M:SS — for the self-destruct countdown.
 const fmtClock = (s: number) => {
@@ -36,120 +16,79 @@ const fmtClock = (s: number) => {
   return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
 };
 
-// The REAL cited photo, served locally from the export — the evidence thesis made
-// tangible (the actual image beside the caption the model wrote blind). Falls back
-// to the ASCII thumb if it can't render: a non-browser format (e.g. HEIC) or the
-// raw media already deleted on the ephemeral path.
-function Photo({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
-  const [failed, setFailed] = useState(false);
-  if (!jobId || failed) return <pre>{thumb(seedOf(md.file), 20, 6)}</pre>;
-  return (
-    <img
-      className="b-photo"
-      src={mediaUrl(jobId, md.file)}
-      alt={md.caption || md.file}
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
-  );
-}
-
-// A cited voice note, actually playable — a mono play/pause transport over the
-// real audio (served locally), with a live ▮▯ progress bar. Falls back to the
-// static ASCII waveform if the format can't play here or the media is gone.
-function AudioBit({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
-  const ref = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [t, setT] = useState(0);
-  const [dur, setDur] = useState(0);
-  if (!jobId) return <pre>{wave(seedOf(md.file), 16)}</pre>;
-  const filled = dur > 0 ? Math.round(Math.min(1, t / dur) * 12) : 0;
-  const bar = "▮".repeat(filled) + "▯".repeat(12 - filled);
-  const toggle = () => {
-    const a = ref.current;
-    if (!a) return;
-    if (a.paused) a.play().catch(() => setFailed(true));
-    else a.pause();
-  };
-  return (
-    <div className="b-audio">
-      {failed ? (
-        <pre>{wave(seedOf(md.file), 16)}</pre>
-      ) : (
-        <button className="audio-btn" onClick={toggle} aria-label={playing ? "pause" : "play"}>
-          <span className="ap-ico">{playing ? "⏸" : "▶"}</span>
-          <span className="ap-bar">{bar}</span>
-          <span className="ap-time">{fmt(t)} / {fmt(dur)}</span>
-        </button>
-      )}
-      <audio
-        ref={ref}
-        src={mediaUrl(jobId, md.file)}
-        preload="metadata"
-        onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
-        onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        onError={() => setFailed(true)}
-      />
-    </div>
-  );
-}
-
-// A cited attachment, rendered as real evidence: the photo (Photo) or a playable
-// voice note (AudioBit); other types keep their ASCII glyph. The blind caption
-// rides underneath either way.
-function BubbleMedia({ jobId, md }: { jobId: string; md: ReceiptMedia }) {
-  const isPhoto = md.type === "image" || md.type === "sticker";
-  return (
-    <figure className="b-media">
-      {isPhoto ? (
-        <Photo jobId={jobId} md={md} />
-      ) : md.type === "audio" ? (
-        <AudioBit jobId={jobId} md={md} />
-      ) : (
-        <pre>{thumb(seedOf(md.file), 20, 6)}</pre>
-      )}
-      {md.caption && (
-        <figcaption>
-          “{md.caption}” <span className="b-blind">— blind caption</span>
-        </figcaption>
-      )}
-    </figure>
-  );
-}
-
-// The cited message(s), rendered inline as real chat bubbles — the one piece of
-// styling the read carries. Actors split left/right (see sidesOf), so a quoted
-// exchange reads the way it did in the app.
-function ChatBubbles({ msgs, sides, jobId }: { msgs: ReceiptMessage[]; sides: Record<string, "me" | "them">; jobId: string }) {
+// A cited message-cluster, rendered inline as real chat bubbles. Each bubble is
+// clickable → the context drawer opens the full chat at that message.
+function ChatBubbles({
+  msgs,
+  sides,
+  jobId,
+  onOpen,
+}: {
+  msgs: ReceiptMessage[];
+  sides: Record<string, "me" | "them">;
+  jobId: string;
+  onOpen: (id: number) => void;
+}) {
   return (
     <div className="bubbles">
       {msgs.map((m) => (
-        <div className={"bubble " + (sides[m.sender] ?? "them")} key={m.id}>
-          <div className="b-meta">
-            {m.sender} · {m.ts}
-          </div>
-          {m.text && <div className="b-text">{m.text}</div>}
-          {m.media.map((md) => (
-            <BubbleMedia key={md.file} jobId={jobId} md={md} />
-          ))}
-        </div>
+        <Bubble key={m.id} m={m} side={sides[m.sender] ?? "them"} jobId={jobId} onOpen={onOpen} />
       ))}
     </div>
   );
 }
 
-const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
+// Compact clickable citation chips — for LONG citation runs and for any id that
+// didn't resolve to a fetched message (so a reference is NEVER dropped or leaked as
+// raw text). A resolvable id opens the drawer; an unresolvable one is shown muted.
+function CiteChips({
+  ids,
+  msgs,
+  onOpen,
+}: {
+  ids: number[];
+  msgs: Record<number, ReceiptMessage>;
+  onOpen: (id: number) => void;
+}) {
+  const { t } = useT();
+  return (
+    <span className="cites">
+      {ids.map((id) =>
+        msgs[id] ? (
+          <button key={id} className="cite" onClick={() => onOpen(id)}>
+            #{id}
+          </button>
+        ) : (
+          <span key={id} className="cite dead" title={t("drawer.notFound")}>
+            #{id}
+          </span>
+        )
+      )}
+    </span>
+  );
+}
 
-// The read: flowing prose, with each [#id] citation (or a run of them) expanded
-// in place into a chat-bubble cluster of the messages it points to. `##` lines,
-// if the model emits any, degrade to a light subheading.
-function renderRead(text: string, msgs: Record<number, ReceiptMessage>, jobId: string): ReactNode[] {
+const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
+const BUBBLE_CAP = 3; // runs up to this many ids stay inline bubbles; longer → chips
+// A citation run: one or more [#id] brackets, back to back, tolerating multi-id /
+// comma forms the model sometimes writes (e.g. [#12, #13]). Captured so split()
+// keeps it as its own token.
+const CITE_RUN = /((?:\s*\[#\s*\d+(?:\s*,\s*#?\s*\d+)*\s*\])+)/g;
+const isCite = (tok: string) => /\[#\s*\d+/.test(tok);
+const idsIn = (tok: string) => [...new Set((tok.match(/\d+/g) || []).map(Number))];
+
+// The read: flowing prose. A SHORT citation run resolves to inline chat-bubble
+// evidence; a LONG run — or any id that didn't resolve — becomes clickable chips
+// (never dropped, never leaked as raw text). Bubbles and chips both open the
+// context drawer at that message. `##` lines degrade to a light subheading.
+function renderRead(
+  text: string,
+  msgs: Record<number, ReceiptMessage>,
+  jobId: string,
+  onOpen: (id: number) => void
+): ReactNode[] {
   const out: ReactNode[] = [];
-  const sides = sidesOf(msgs);
+  const sides = sidesOf(Object.values(msgs));
   let firstProse = true;
   text.split(/\n\n+/).forEach((block, bi) => {
     const b = block.trim();
@@ -159,11 +98,26 @@ function renderRead(text: string, msgs: Record<number, ReceiptMessage>, jobId: s
       out.push(<h2 className="subhead" key={"h" + bi}>{head[1]}</h2>);
       return;
     }
-    b.split(/((?:\s*\[#\d+\])+)/g).forEach((tok, ti) => {
-      if (/\[#\d+\]/.test(tok)) {
-        const ids = [...new Set([...tok.matchAll(/\[#(\d+)\]/g)].map((m) => Number(m[1])))];
-        const cited = ids.map((id) => msgs[id]).filter(Boolean) as ReceiptMessage[];
-        if (cited.length) out.push(<ChatBubbles key={"b" + bi + "_" + ti} msgs={cited} sides={sides} jobId={jobId} />);
+    b.split(CITE_RUN).forEach((tok, ti) => {
+      if (isCite(tok)) {
+        const ids = idsIn(tok);
+        const resolvable = ids.filter((id) => msgs[id]);
+        const key = "c" + bi + "_" + ti;
+        if (ids.length <= BUBBLE_CAP && resolvable.length > 0) {
+          out.push(
+            <ChatBubbles
+              key={key}
+              msgs={resolvable.map((id) => msgs[id])}
+              sides={sides}
+              jobId={jobId}
+              onOpen={onOpen}
+            />
+          );
+          const dead = ids.filter((id) => !msgs[id]);
+          if (dead.length) out.push(<CiteChips key={key + "d"} ids={dead} msgs={msgs} onOpen={onOpen} />);
+        } else {
+          out.push(<CiteChips key={key} ids={ids} msgs={msgs} onOpen={onOpen} />);
+        }
       } else {
         const p = tok.trim();
         if (p && !PUNCT_ONLY.test(p)) {
@@ -191,6 +145,7 @@ export default function Result() {
   const [receipt, setReceipt] = useState<string[]>([]);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [destroyed, setDestroyed] = useState(false);
+  const [drawerFocus, setDrawerFocus] = useState<number | null>(null); // cited-message drawer
 
   // Self-destruct countdown: tick down to the read's expires_at (hosted tier).
   // At zero the read is gone server-side (the sweeper deletes it) — reflect that.
@@ -283,7 +238,7 @@ export default function Result() {
       )}
 
       <div className="read">
-        {renderRead(res.read, msgs, id ?? "")}
+        {renderRead(res.read, msgs, id ?? "", setDrawerFocus)}
 
         {res.deep_count ? (
           <p className="prov">
@@ -336,6 +291,7 @@ export default function Result() {
           </button>
         </>
       )}
+      <ChatDrawer jobId={id ?? ""} focusId={drawerFocus} onClose={() => setDrawerFocus(null)} />
     </Frame>
   );
 }
