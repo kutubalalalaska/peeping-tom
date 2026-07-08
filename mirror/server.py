@@ -212,6 +212,7 @@ def _read(job_id: str):
     try:
         st = jobs.get_status(job_id) or {}
         me = st.get("me") or ""          # identity deferred to v2; the read isn't anchored to a name
+        lang = st.get("lang")            # the read's output language (chosen UI language)
         route = settings.route(st.get("route"))
         if route is None:
             jobs.set_status(job_id, state="needs_config", message=settings.frontier_hint()); return
@@ -240,7 +241,7 @@ def _read(job_id: str):
 
         def stream_read(src_text: str, select_k: int):
             """One streamed one-shot read → (read_body, picks). INSPECT/NOTE handled."""
-            raw = frontier.read(src_text, me, route, select_k=select_k, on_delta=mk_on_delta())
+            raw = frontier.read(src_text, me, route, select_k=select_k, on_delta=mk_on_delta(), lang=lang)
             notes, body, picks = frontier.split_stream_read(raw)
             flush = {"partial_read": body}
             if notes:                                # don't clobber a streamed reasoning trace
@@ -297,7 +298,7 @@ def _read(job_id: str):
             # the deepened captions changed the transcript — persist what actually crossed
             jobs.path(job_id, "transcript.txt").write_text(T.assemble_for_read(msgs_all, media_all))
             jobs.set_status(job_id, message=f"synthesising the arc across {n} eras…")
-            final = frontier.synthesize(eras, route, on_delta=mk_on_delta())
+            final = frontier.synthesize(eras, route, on_delta=mk_on_delta(), lang=lang)
             jobs.set_status(job_id, partial_read=final)
             first_read = final
         else:
@@ -383,7 +384,8 @@ def quota(request: Request):
 
 
 @app.post("/api/upload")
-async def upload(request: Request, bg: BackgroundTasks, file: UploadFile, source: str = Form("whatsapp")):
+async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
+                 source: str = Form("whatsapp"), lang: str = Form("en")):
     # Abuse moat (hosted tier only): cap reads per cookie-session and per IP over a
     # rolling window. No login, no PII — just enough to stop scraping + runaway spend.
     if settings.hosted:
@@ -395,6 +397,9 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile, source
         jid = jobs.create(source=source, sid=sid, ip=ip)
     else:
         jid = jobs.create(source=source)
+    # The chosen UI language sets the read's OUTPUT language (frontier maps it via a
+    # whitelist; an unknown code is ignored). Deliberately independent of Whisper.
+    jobs.set_status(jid, lang=(lang or "en").split("-")[0].lower()[:5])
     zp = jobs.path(jid, "upload.zip")
     # Stream the upload to disk in chunks — a multi-GB export would otherwise load
     # whole into RAM via file.read() and risk OOM on a small Docker VM.

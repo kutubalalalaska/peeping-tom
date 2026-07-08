@@ -5,6 +5,7 @@ import type { JobStatus, RecentItem } from "../types";
 import Frame from "./Frame";
 import { SPIN, seedOf, thumb, wave, player, progBar, scanBar } from "../lib/ascii";
 import { useSpinFrame } from "../lib/hooks";
+import { useT } from "../lib/i18n";
 
 const tag = (t: string) =>
   t === "sticker" ? "stk" : t === "video" ? "vid" : t === "audio" ? "aud" : "img";
@@ -16,17 +17,6 @@ function fmtEta(s: number): string {
   const m = Math.round(s / 60);
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
-
-// Calm, on-narrative lines that rotate during the (minutes-long) read so the
-// screen never feels dead. They restate the privacy invariant, never overstate it.
-const TIPS = [
-  "the model reads what's implicit — not just what you said.",
-  "only the text transcript crossed. your photos never left this machine.",
-  "patterns surface across time, not in any single message.",
-  "every claim comes back with the exact messages behind it.",
-  "a long history can take a few minutes to read.",
-];
-const tipOf = (sf: number) => TIPS[Math.floor(sf / 70) % TIPS.length]; // ~5s each
 
 // One decoded item rendered as ASCII (the design replaces real imagery with text).
 function Glimpse({ item, sf }: { item: RecentItem; sf: number }) {
@@ -55,11 +45,12 @@ function Glimpse({ item, sf }: { item: RecentItem; sf: number }) {
 // Reused for the up-front pass (inspecting) AND the read's deep-look pass
 // (analyzing) — the relocated "watch the mirror open the photos" spectacle.
 function Carousel({ recent, sf, label }: { recent: RecentItem[]; sf: number; label: string }) {
+  const { t } = useT();
   const latest = recent[recent.length - 1];
   return (
     <div className="pcontent">
       <div className="stage">
-        {latest ? <Glimpse item={latest} sf={sf} /> : <div className="up">parsing…</div>}
+        {latest ? <Glimpse item={latest} sf={sf} /> : <div className="up">{t("insp.parsingShort")}</div>}
       </div>
       <div className="tail">
         <div className="lab">{label}</div>
@@ -124,13 +115,14 @@ function LiveRead({ text }: { text: string }) {
 // working-lines (NOTE-derived) or a longer raw reasoning stream — we render the
 // tail either way so it stays compact.
 function ThinkingTicker({ text, sf }: { text: string; sf: number }) {
+  const { t } = useT();
   const spin = SPIN[sf % SPIN.length];
   const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   const asList = lines.length >= 2;
   const view = asList ? lines.slice(-5) : [text.length > 280 ? "…" + text.slice(-280) : text];
   return (
     <div className="thinking">
-      <div className="th-head">{spin}&nbsp;&nbsp;thinking…</div>
+      <div className="th-head">{spin}&nbsp;&nbsp;{t("insp.thinking")}</div>
       <div className="th-lines">
         {view.map((l, i) => {
           const last = i === view.length - 1;
@@ -158,6 +150,7 @@ export default function Inspection() {
   const [s, setS] = useState<JobStatus | null>(null);
   const nav = useNavigate();
   const sf = useSpinFrame(true);
+  const { t, tList } = useT();
 
   useEffect(() => {
     if (!id) return;
@@ -188,16 +181,16 @@ export default function Inspection() {
 
   if (state === "error") {
     return (
-      <Frame step="error" hero="something broke">
+      <Frame step={t("insp.errorStep")} hero={t("insp.errorHero")}>
         <p className="err">{s?.message}</p>
       </Frame>
     );
   }
   if (state === "needs_config") {
     return (
-      <Frame step="config" hero="no read route">
+      <Frame step={t("insp.configStep")} hero={t("insp.configHero")}>
         <p className="err">{s?.message}</p>
-        <p className="hint2">set a read route (or FRONTIER_PROVIDER=mock) and retry.</p>
+        <p className="hint2">{t("insp.configHint")}</p>
       </Frame>
     );
   }
@@ -206,28 +199,33 @@ export default function Inspection() {
   // status.message: reading the chat, opening the photos it flagged (the relocated
   // media spectacle), then re-reading with them in view.
   if (state === "analyzing") {
-    const msg = s?.message ?? "the model is reading the transcript…";
+    // `rawMsg` is the backend's own status line (still English — see i18n phase 2);
+    // it drives the deep-look detection below, so read it before falling back.
+    const rawMsg = s?.message;
+    const msg = rawMsg ?? t("insp.readingFallback");
     const thinking = s?.partial_thinking?.trim();
     const partial = s?.partial_read?.trim();
     // The deep-look sub-phase. The backend leaves partial_read holding the prior
     // read while it opens images, so the carousel (the relocated media spectacle)
     // must win over the stale partial here.
-    const opening = /opening/i.test(msg);
+    const opening = /opening/i.test(rawMsg ?? "");
     const imgs = recent.filter((it) => it.type !== "audio");
     const showCarousel = opening && imgs.length > 0;
     const showRead = !showCarousel && !!partial;
     // Honest motion while we wait: the model's live thinking shows first, and the
     // read takes over the moment it actually starts writing.
     const showThinking = !showCarousel && !showRead && !!thinking;
+    const tips = tList("insp.tips");
+    const tip = tips[Math.floor(sf / 70) % tips.length]; // ~5s each
     return (
       <Frame
-        step="step 4/4 · the read"
-        hero={showCarousel ? "opening the photos it flagged" : "reading your chat"}
+        step={t("insp.step4")}
+        hero={showCarousel ? t("insp.openingPhotos") : t("insp.readingChat")}
         top={showRead}
-        custody="✓ raw media stays local · only the transcript crossed"
+        custody={t("insp.custodyAnalyzing")}
       >
         {showCarousel ? (
-          <Carousel recent={imgs} sf={sf} label="just opened" />
+          <Carousel recent={imgs} sf={sf} label={t("insp.justOpened")} />
         ) : showRead ? (
           <LiveRead text={partial!} />
         ) : showThinking ? (
@@ -239,7 +237,7 @@ export default function Inspection() {
             <div className="up">
               {msg}
               <br />
-              <span className="tip">{tipOf(sf)}</span>
+              <span className="tip">{tip}</span>
             </div>
           </div>
         )}
@@ -247,7 +245,7 @@ export default function Inspection() {
           <span className="pre">{scanBar(sf)}</span>
           <span className="phase">
             {spin}&nbsp;&nbsp;{msg}
-            {eta ? <span className="eta">  ·  ~{fmtEta(eta)} left</span> : null}
+            {eta ? <span className="eta">  ·  {t("insp.etaLeft", { eta: fmtEta(eta) })}</span> : null}
           </span>
         </div>
       </Frame>
@@ -261,26 +259,32 @@ export default function Inspection() {
   // nor show an empty media stage.
   const uploading = state === "uploaded" || !state;
   const hasVisual = recent.some((it) => it.type !== "audio");
-  const hero = uploading ? "uploading your chat" : hasVisual ? "decoding your media" : "parsing your chat";
-  const step = uploading ? "step 3/4 · upload" : `step 3/4 · ${hasVisual ? "decode" : "parse"}`;
+  const hero = uploading
+    ? t("insp.uploadingHero")
+    : hasVisual
+    ? t("insp.decodingHero")
+    : t("insp.parsingHero");
+  const step = uploading
+    ? t("insp.step3upload")
+    : t(hasVisual ? "insp.step3decode" : "insp.step3parse");
   return (
-    <Frame step={step} hero={hero} custody="processed on this machine — nothing has left it">
+    <Frame step={step} hero={hero} custody={t("insp.custodyLocal")}>
       {uploading ? (
         <div className="pcontent">
           <div className="up">
-            sending chat.zip to this machine…
+            {t("insp.uploadingBody1")}
             <br />
-            the raw file stays local
+            {t("insp.uploadingBody2")}
           </div>
         </div>
       ) : recent.length ? (
-        <Carousel recent={recent} sf={sf} label="just decoded" />
+        <Carousel recent={recent} sf={sf} label={t("insp.justDecoded")} />
       ) : (
         <div className="pcontent">
           <div className="up">
-            {s?.message ?? "parsing your chat…"}
+            {s?.message ?? t("insp.parsingFallback")}
             <br />
-            reading messages and transcribing voice notes — locally
+            {t("insp.parsingBody")}
           </div>
         </div>
       )}
@@ -289,11 +293,11 @@ export default function Inspection() {
         <span className="phase">
           {spin}&nbsp;&nbsp;
           {uploading
-            ? "uploading…"
+            ? t("start.uploading")
             : total
-            ? `${hasVisual ? "decode" : "transcribe"}  ${done}/${total}`
-            : "parsing…"}
-          {eta ? <span className="eta">  ·  ~{fmtEta(eta)} left</span> : null}
+            ? `${t(hasVisual ? "insp.phaseDecode" : "insp.phaseTranscribe")}  ${done}/${total}`
+            : t("insp.parsingShort")}
+          {eta ? <span className="eta">  ·  {t("insp.etaLeft", { eta: fmtEta(eta) })}</span> : null}
         </span>
       </div>
     </Frame>

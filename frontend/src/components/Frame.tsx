@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useTypeIn } from "../lib/hooks";
+import LangSwitcher from "./LangSwitcher";
 
 // The persistent terminal shell: a stepline, the `> typed hero + caret`, a
 // scrolling content area, and a footer (nav + custody line). Each screen renders
@@ -26,7 +27,10 @@ export default function Frame({
     <>
       <div className="meta">
         <span>drop 001: peeping tom</span>
-        <span>{run ?? ""}</span>
+        <span className="meta-right">
+          {run ? <span>{run}</span> : null}
+          <LangSwitcher />
+        </span>
       </div>
       <div className="frame">
         <div className="stepline">

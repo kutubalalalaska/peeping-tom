@@ -44,6 +44,15 @@ button { font: inherit; cursor: pointer; }
   display: flex; justify-content: space-between; align-items: baseline;
   font-size: 11px; color: var(--muted); letter-spacing: .06em; margin-bottom: 12px;
 }
+.meta-right { display: inline-flex; gap: 12px; align-items: baseline; }
+.langsw { display: inline-flex; gap: 8px; align-items: baseline; }
+.langsw button {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); border-bottom: 1px solid transparent;
+}
+.langsw button:hover { color: var(--secondary); }
+.langsw button.on { color: var(--ink); border-bottom-color: var(--ink); }
 .frame {
   width: min(1120px, 90vw); height: min(820px, 84vh);
   border: 1px solid var(--ink); padding: clamp(26px, 3vw, 44px);

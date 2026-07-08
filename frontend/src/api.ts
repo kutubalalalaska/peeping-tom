@@ -19,10 +19,12 @@ export const getConfig = async () => asJson<AppConfig>(await fetch("/api/config"
 // Reads left for this cookie-session (Landing readout, hosted tier).
 export const getQuota = async () => asJson<Quota>(await fetch("/api/quota"));
 
-export async function uploadChat(file: File, source: string) {
+// `lang` (the chosen UI language) rides along so the read comes back in it.
+export async function uploadChat(file: File, source: string, lang?: string) {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("source", source);
+  if (lang) fd.append("lang", lang);
   return asJson<{ job_id: string }>(
     await fetch("/api/upload", { method: "POST", body: fd })
   );

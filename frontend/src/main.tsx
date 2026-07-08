@@ -8,17 +8,20 @@ import Landing from "./components/Landing";
 import Start from "./components/Start";
 import Inspection from "./components/Inspection";
 import Result from "./components/Result";
+import { I18nProvider } from "./lib/i18n";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/start" element={<Start />} />
-        <Route path="/job/:id" element={<Inspection />} />
-        <Route path="/result/:id" element={<Result />} />
-      </Routes>
-    </BrowserRouter>
+    <I18nProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/start" element={<Start />} />
+          <Route path="/job/:id" element={<Inspection />} />
+          <Route path="/result/:id" element={<Result />} />
+        </Routes>
+      </BrowserRouter>
+    </I18nProvider>
   </React.StrictMode>
 );

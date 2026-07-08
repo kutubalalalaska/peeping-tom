@@ -4,6 +4,7 @@ import { getResult, getRetained, getMessages, deleteJob, transcriptUrl, mediaUrl
 import type { ReadResult, Retained, ReceiptMessage, ReceiptMedia } from "../types";
 import Frame from "./Frame";
 import { seedOf, thumb, wave } from "../lib/ascii";
+import { useT } from "../lib/i18n";
 
 // Stable left/right side per actor: distinct senders are ordered by first
 // appearance and alternated, so each person sits consistently on one side across
@@ -182,6 +183,7 @@ function renderRead(text: string, msgs: Record<number, ReceiptMessage>, jobId: s
 export default function Result() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const { t, tList } = useT();
   const [res, setRes] = useState<ReadResult | null>(null);
   const [retained, setRetained] = useState<Retained | null>(null);
   const [msgs, setMsgs] = useState<Record<number, ReceiptMessage>>({});
@@ -232,15 +234,7 @@ export default function Result() {
     deleteJob(id).catch(() => undefined);
     setNuked(true);
     setRetained({ raw_media: false, transcript: false, read: false });
-    const STEPS = [
-      "> nuke --all",
-      "purging raw media ........ gone",
-      "purging transcript ....... gone",
-      "purging the read ......... gone",
-      "purging this session ..... gone",
-      "",
-      "✓ nothing remains. starting over…",
-    ];
+    const STEPS = tList("result.nukeSteps");
     let i = 0;
     const acc: string[] = [];
     const tick = () => {
@@ -256,7 +250,7 @@ export default function Result() {
 
   if (!res) {
     return (
-      <Frame step="step 4/4 · the read" hero="loading the read">
+      <Frame step={t("insp.step4")} hero={t("result.loadingHero")}>
         <div className="up">…</div>
       </Frame>
     );
@@ -264,18 +258,11 @@ export default function Result() {
 
   if (destroyed && !nuked) {
     return (
-      <Frame step="step 4/4 · the read" hero="self-destructed" custody="✓ nothing remains">
-        <pre className="receipt">
-          {[
-            "this read has self-destructed.",
-            "",
-            "the transcript, the media, and the read —",
-            "all deleted automatically. nothing remains.",
-          ].join("\n")}
-        </pre>
+      <Frame step={t("insp.step4")} hero={t("result.destroyedHero")} custody={t("result.custodyNothing")}>
+        <pre className="receipt">{tList("result.destroyedBody").join("\n")}</pre>
         <button className="nuke" onClick={() => nav("/")}>
-          start over
-          <small>upload another chat for a fresh read</small>
+          {t("result.startOver")}
+          <small>{t("result.startOverSub")}</small>
         </button>
       </Frame>
     );
@@ -283,15 +270,15 @@ export default function Result() {
 
   return (
     <Frame
-      step="step 4/4 · the read"
-      hero="the read"
+      step={t("insp.step4")}
+      hero={t("result.hero")}
       top
-      custody={nuked ? "✓ nothing remains" : "✓ raw media stays local · the read is yours to keep or destroy"}
+      custody={nuked ? t("result.custodyNothing") : t("result.custodyKeep")}
     >
       {remaining !== null && !nuked && (
         <div className={"selfdestruct" + (remaining <= 60 ? " urgent" : "")}>
-          this read self-destructs in <strong>{fmtClock(remaining)}</strong>
-          <small>then the transcript, media, and read are deleted automatically — or nuke it now</small>
+          {t("result.selfDestructIn")} <strong>{fmtClock(remaining)}</strong>
+          <small>{t("result.selfDestructSub")}</small>
         </div>
       )}
 
@@ -300,18 +287,20 @@ export default function Result() {
 
         {res.deep_count ? (
           <p className="prov">
-            the model asked for a closer look at {res.deep_count} photo
-            {res.deep_count > 1 ? "s" : ""}, then re-read with them in view.
+            {res.deep_count === 1
+              ? t("result.deepProv1", { n: res.deep_count })
+              : t("result.deepProvN", { n: res.deep_count })}
           </p>
         ) : null}
 
         <div className="prov">
-          read by {res.model || "the model"}
-          {res.route ? ` · via the ${res.route} route` : ""} — only the text transcript crossed.
+          {res.route
+            ? t("result.readByRoute", { model: res.model || t("result.theModel"), route: res.route })
+            : t("result.readByNoRoute", { model: res.model || t("result.theModel") })}
         </div>
       </div>
 
-      <div className="provoke">this is how a frontier ai model profiled you — for good, or for bad.</div>
+      <div className="provoke">{t("result.provoke")}</div>
 
       {nuked ? (
         <pre className="receipt">{receipt.join("\n")}</pre>
@@ -320,14 +309,19 @@ export default function Result() {
           {id && (
             <div className="sent-link">
               <a className="link" href={transcriptUrl(id)} target="_blank" rel="noreferrer">
-                view the exact text that was sent →
+                {t("result.viewText")}
               </a>
             </div>
           )}
           <div className="prov">
-            held now: {retained?.raw_media ? "raw media · " : ""}
-            {retained?.transcript ? "transcript · " : ""}
-            {retained?.read ? "the read" : "—"}
+            {t("result.heldNow")}{" "}
+            {[
+              retained?.raw_media && t("result.heldRawMedia"),
+              retained?.transcript && t("result.heldTranscript"),
+              retained?.read && t("result.heldRead"),
+            ]
+              .filter(Boolean)
+              .join(" · ") || t("result.heldNone")}
           </div>
           {/* TODO — SHARE BUTTON (PARKED; Konstantin undecided, 2026-06-23).
               Tension: a share affordance would hype the research / drive referral
@@ -337,8 +331,8 @@ export default function Result() {
               would be great for our reach — but you're better off deleting it."
               Settle the framing with the narrative thread before building. */}
           <button className="nuke" onClick={doNuke}>
-            nuke all my data
-            <small>deletes the transcript, the read, everything — no copy is kept</small>
+            {t("result.nukeBtn")}
+            <small>{t("result.nukeSub")}</small>
           </button>
         </>
       )}

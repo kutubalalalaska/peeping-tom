@@ -89,6 +89,24 @@ SYNTH_USER = (
 )
 
 
+# The read's language follows the user's chosen UI language (not the chat's, and not
+# Whisper's) — the analysis comes back in whatever the reader picked, whatever tongue
+# the conversation is in.
+_LANG_NAMES = {"en": "English", "ru": "Russian", "it": "Italian"}
+
+
+def _lang_directive(lang) -> str:
+    """Instruction appended to the read prompt so the analysis is written in the user's
+    chosen language. Only WHITELISTED codes produce any text — an unknown/empty code
+    adds nothing, so a request can never smuggle arbitrary instructions in via `lang`."""
+    name = _LANG_NAMES.get((lang or "").split("-")[0].lower())
+    if not name:
+        return ""
+    return (f"\n\nWrite your ENTIRE analysis in {name}, regardless of the language of the "
+            f"conversation. Keep every [#id] citation exactly as written, and do not translate "
+            f"the participants' quoted words — only your own analysis prose is in {name}.")
+
+
 class NotConfigured(RuntimeError):
     pass
 
@@ -271,7 +289,7 @@ def _emit_mock_stream(full: str, on_delta) -> None:
         time.sleep(0.03)
 
 
-def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None) -> str:
+def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None, lang=None) -> str:
     """Perform the read over `route` (a config.Route). Falls back to the default
     route when none is passed. Only the TEXT transcript is sent — never raw media.
     If select_k>0, the read is asked to append an INSPECT=[…] line picking up to
@@ -293,6 +311,7 @@ def read(transcript: str, me: str, route=None, select_k: int = 0, on_delta=None)
             _emit_mock_stream(out, on_delta)
         return out
     user = USER.format(transcript=transcript)
+    user += _lang_directive(lang)
     if select_k:
         user += SELECT_INSTRUCTION.format(k=select_k)
     if on_delta is not None and not settings.stream_reasoning:
@@ -490,15 +509,16 @@ def read_era(transcript: str, route, part: int, total: int, select_k: int = 0):
     return parse_inspect(raw)                          # (clean_text, [picked ids])
 
 
-def synthesize(eras, route, on_delta=None) -> str:
+def synthesize(eras, route, on_delta=None, lang=None) -> str:
     """Reduce step: combine labelled era-readings [(label, text), ...] into the final
-    read. Streams like a normal read when on_delta is given."""
+    read. Streams like a normal read when on_delta is given. `lang` writes the final
+    synthesis in the user's chosen language even when the era-readings are in English."""
     route = route or settings.route()
     if route is None or not route.ready():
         raise NotConfigured(settings.frontier_hint())
     blocks = "\n\n".join(f"=== ERA {i + 1}/{len(eras)} · {lab} ===\n{txt}"
                          for i, (lab, txt) in enumerate(eras))
-    user = SYNTH_USER.format(total=len(eras), eras=blocks)
+    user = SYNTH_USER.format(total=len(eras), eras=blocks) + _lang_directive(lang)
     return _complete_simple(SOUL, user, route, on_delta=on_delta)
 
 
