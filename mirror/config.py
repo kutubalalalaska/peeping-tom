@@ -225,6 +225,13 @@ class Settings:
     session_cookie: str = os.environ.get("SESSION_COOKIE", "mirror_sid")
     cookie_secure: bool = _b("COOKIE_SECURE")  # set in prod (HTTPS) so the cookie is Secure
 
+    # --- resumable chunked upload: total-size guard (app-side, graceful) ---
+    # The export arrives as many small client-sliced chunks, assembled on disk (see
+    # mirror/uploads.py). This caps the TOTAL assembled size with a friendly error —
+    # a real, env-tunable limit sized to what the box can decode, NOT a proxy magic
+    # number. Large but finite; the true cost of a huge chat is CPU decode time.
+    max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "4096"))
+
     data_dir: str = os.environ.get("DATA_DIR", "/data")
     web_dir: str = os.environ.get("WEB_DIR", "")   # built React SPA; empty -> placeholder pages
 

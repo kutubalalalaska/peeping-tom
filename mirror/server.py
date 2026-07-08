@@ -24,7 +24,7 @@ from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, R
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, decode, transcript as T, frontier, jobs, budget
+from . import ingest, decode, transcript as T, frontier, jobs, budget, uploads
 from .config import settings
 
 HERE = Path(__file__).parent
@@ -32,6 +32,10 @@ WEB = Path(settings.web_dir) if settings.web_dir else None
 SPA = bool(WEB and (WEB / "index.html").exists())
 
 app = FastAPI(title="Inward Mirror")
+
+# Resumable chunked-upload routes (mirror/uploads.py). Registered here, BEFORE the
+# SPA catch-all below, so GET /api/upload/{id}/offset isn't shadowed by it.
+app.include_router(uploads.router)
 
 
 def _client_ip(request: Request) -> str:
@@ -506,6 +510,11 @@ def messages(job_id: str, ids: str = ""):
         out.append({"id": m["id"], "ts": m["ts"], "sender": m["sender"],
                     "text": m["text"], "media": rich})
     return out
+
+
+# The chunked-upload router hands finished uploads back to the LOCAL pipeline via
+# this callback (set here to avoid a circular import between server and uploads).
+uploads.PREPROCESS = _preprocess
 
 
 # ---- frontend ----
