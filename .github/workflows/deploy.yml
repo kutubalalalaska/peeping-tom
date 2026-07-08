@@ -15,6 +15,11 @@ name: deploy-prod
 # After that, each push to main rebuilds + restarts the stack on the box. Repo
 # secrets are never exposed to fork pull requests -- this runs only on push to
 # main and manual dispatch, both of which require write access.
+#
+# NOTE: `caddy reload` applies Caddyfile edits with zero downtime, but does NOT
+# provision a cert for a brand-NEW domain. If you add a domain to the Caddyfile,
+# run `docker compose -f docker-compose.prod.yml restart caddy` on the VPS once
+# (a fresh start reliably obtains the new cert; it then persists in the volume).
 
 on:
   push:
@@ -50,4 +55,4 @@ jobs:
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "$VPS_USER@$VPS_HOST" \
-            'set -e; cd ~/immovable-object-part-1; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker compose -f docker-compose.prod.yml restart caddy; sleep 12; docker image prune -f; echo "=== CADDY-WWW-DIAG ==="; docker compose -f docker-compose.prod.yml logs caddy --since 3m --no-color 2>&1 | grep -iE "www|obtain|challenge|error|acme|certificate|enabling" | tail -30'
+            'set -e; cd ~/immovable-object-part-1; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || echo "WARN: caddy reload failed (Caddyfile change not applied)"; docker image prune -f; docker compose -f docker-compose.prod.yml ps'
