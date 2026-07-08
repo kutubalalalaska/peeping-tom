@@ -5,6 +5,12 @@
 	email {$ACME_EMAIL}
 }
 
+# Redirect www -> apex (Caddy auto-fetches a cert for www too). Without this block,
+# hitting www.<domain> gives a TLS error since no site is configured for it.
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
 {$DOMAIN} {
 	encode gzip
 	# Bound upload size so a huge zip can't exhaust memory (the app reads the
