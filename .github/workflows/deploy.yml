@@ -50,4 +50,4 @@ jobs:
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "$VPS_USER@$VPS_HOST" \
-            'set -e; cd ~/immovable-object-part-1; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || echo "WARN: caddy reload failed (Caddyfile change not applied)"; docker image prune -f; docker compose -f docker-compose.prod.yml ps'
+            'set -e; cd ~/immovable-object-part-1; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || echo "WARN: caddy reload failed (Caddyfile change not applied)"; docker image prune -f; docker compose -f docker-compose.prod.yml ps; echo "=== CADDY-ACME-DIAG ==="; docker compose -f docker-compose.prod.yml logs caddy --tail 120 --no-color 2>&1 | grep -iE "acme|obtain|challenge|error|www|certificate|rate" | tail -30'
