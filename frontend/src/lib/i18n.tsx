@@ -87,7 +87,7 @@ const en = {
   "insp.configHero": "no read route",
   "insp.configHint": "set a read route (or FRONTIER_PROVIDER=mock) and retry.",
   "insp.readingFallback": "the model is reading the transcript…",
-  "insp.openingPhotos": "opening the photos it flagged",
+  "insp.openingPhotos": "opening important photos",
   "insp.readingChat": "reading your chat",
   "insp.justOpened": "just opened",
   "insp.justDecoded": "just decoded",
@@ -281,7 +281,7 @@ const ru: Dict = {
   "insp.configHint":
     "задайте маршрут разбора (или FRONTIER_PROVIDER=mock) и повторите.",
   "insp.readingFallback": "модель читает транскрипт…",
-  "insp.openingPhotos": "открываю отмеченные фото",
+  "insp.openingPhotos": "открываю важные фото",
   "insp.readingChat": "читаю ваш чат",
   "insp.justOpened": "только что открыто",
   "insp.justDecoded": "только что декодировано",
@@ -471,7 +471,7 @@ const it: Dict = {
   "insp.configHint":
     "imposta una rotta di lettura (o FRONTIER_PROVIDER=mock) e riprova.",
   "insp.readingFallback": "il modello sta leggendo la trascrizione…",
-  "insp.openingPhotos": "apro le foto segnalate",
+  "insp.openingPhotos": "apro le foto importanti",
   "insp.readingChat": "sto leggendo la tua chat",
   "insp.justOpened": "appena aperto",
   "insp.justDecoded": "appena decodificato",
