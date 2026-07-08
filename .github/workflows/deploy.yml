@@ -46,5 +46,8 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
             -o StrictHostKeyChecking=accept-new \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "$VPS_USER@$VPS_HOST" \
             'set -e; cd ~/immovable-object-part-1/mirror-app; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true; docker image prune -f; docker compose -f docker-compose.prod.yml ps'
