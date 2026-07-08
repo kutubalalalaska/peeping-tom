@@ -46,6 +46,7 @@ const en = {
   "start.consent":
     "this is my own conversation and it contains no illegal content.",
   "start.errRate": "You've reached your reads for now. Try again later.",
+  "start.errTooLarge": "That chat export is too large to upload here.",
   "start.wa.iphone": [
     "open the chat in whatsapp.",
     "tap the contact / group name at the top.",
@@ -244,6 +245,7 @@ const ru: Dict = {
     "это моя собственная переписка, и она не содержит незаконного контента.",
   "start.errRate":
     "Вы исчерпали лимит разборов на сейчас. Попробуйте позже.",
+  "start.errTooLarge": "Этот экспорт чата слишком большой для загрузки здесь.",
   "start.wa.iphone": [
     "откройте чат в whatsapp.",
     "нажмите на имя контакта / группы вверху.",
@@ -440,6 +442,7 @@ const it: Dict = {
     "questa è una mia conversazione e non contiene contenuti illegali.",
   "start.errRate":
     "Hai raggiunto il limite di letture per ora. Riprova più tardi.",
+  "start.errTooLarge": "Questo export della chat è troppo grande per caricarlo qui.",
   "start.wa.iphone": [
     "apri la chat in whatsapp.",
     "tocca il nome del contatto / gruppo in alto.",

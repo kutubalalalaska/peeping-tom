@@ -2,6 +2,7 @@
 
 export type State =
   | "uploaded"
+  | "uploading"
   | "inspecting"
   | "ready"
   | "analyzing"

@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploadChat, getConfig } from "../api";
+import { uploadChatChunked, getConfig } from "../api";
 import { useT } from "../lib/i18n";
 import { detectOS, isMobileOS } from "../lib/platform";
+import { progBar } from "../lib/ascii";
 import Frame from "./Frame";
 
 // Pull a human message out of a thrown api error ("429 {\"detail\":\"…\"}"). The
-// backend detail is English, so for a rate-limit we show the localized copy;
-// other (technical) errors surface raw.
-function friendlyError(e: unknown, rateMsg: string): string {
+// backend detail is English, so for the guard cases we show localized copy; other
+// (technical) errors surface raw.
+function friendlyError(e: unknown, rateMsg: string, tooLargeMsg: string): string {
   const s = String(e);
-  return s.includes("429") ? rateMsg : s;
+  if (s.includes("429")) return rateMsg;
+  if (s.includes("413")) return tooLargeMsg;
+  return s;
 }
 
 type Platform = "whatsapp" | "telegram";
@@ -29,10 +32,12 @@ export default function Start() {
   const [os, setOs] = useState<OS>(detectedOS === "android" ? "android" : "iphone");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pct, setPct] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [hosted, setHosted] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const nav = useNavigate();
   const { t, tList, lang } = useT();
 
@@ -41,16 +46,27 @@ export default function Start() {
     getConfig().then((c) => setHosted(c.hosted)).catch(() => undefined);
   }, []);
 
+  // Abort an in-flight upload if the user navigates away mid-transfer.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!file || !platform || (hosted && !agreed)) return;
     setErr(null);
     setBusy(true);
+    setPct(0);
+    abortRef.current = new AbortController();
     try {
-      const { job_id } = await uploadChat(file, platform, lang);
+      // Resumable chunked upload: shows real progress and survives a dropped
+      // connection (retry from the server's byte offset). See mirror/uploads.py.
+      const { job_id } = await uploadChatChunked(file, platform, lang, {
+        signal: abortRef.current.signal,
+        onProgress: (received, total) => setPct(total ? Math.round((received / total) * 100) : 0),
+      });
       nav(`/job/${job_id}`);
     } catch (e) {
-      setErr(friendlyError(e, t("start.errRate")));
+      if ((e as Error)?.name === "AbortError") return; // navigated away — nothing to show
+      setErr(friendlyError(e, t("start.errRate"), t("start.errTooLarge")));
       setBusy(false);
     }
   }
@@ -156,9 +172,10 @@ export default function Start() {
               className={"opt solid" + (file && (!hosted || agreed) ? " ok" : "")}
               disabled={!file || busy || (hosted && !agreed)}
             >
-              [ {busy ? t("start.uploading") : t("start.uploadBtn")} ]
+              [ {busy ? `${t("start.uploading")} ${pct}%` : t("start.uploadBtn")} ]
             </button>
           </div>
+          {busy && <pre className="uppre">{progBar(pct)}</pre>}
           {hosted && (
             <label className="consent">
               <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
