@@ -5,7 +5,7 @@ sends them to the user-configured frontier model, returns the read text.
 Provider-agnostic: OpenAI-compatible (VPS/vLLM/most APIs) or Anthropic.
 """
 
-import json, re, ssl, time, urllib.request
+import json, re, ssl, time, urllib.error, urllib.request
 from pathlib import Path
 
 from .config import settings
@@ -118,6 +118,46 @@ def _post_stream(url, payload, headers, on_event):
                 on_event(json.loads(data))
             except json.JSONDecodeError:
                 continue                                # ignore malformed/partial chunks
+
+
+def _http_status(url, headers, timeout=15):
+    """GET `url` with `headers`; return the HTTP status code (the HTTPError code on a
+    4xx/5xx), or None if the request couldn't be made at all. Used by probe_auth."""
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return None
+
+
+def probe_auth(route):
+    """Cheap boot-time auth check for a route. Returns (ok, detail): ok is True (auth
+    verified), False (auth rejected — e.g. a wrong/missing key), or None (couldn't
+    verify: network/unknown — don't cry wolf). Never raises. Route.ready() only checks
+    that a base_url+model exist, so THIS is what actually catches a bad API key before a
+    user's read fails with a cryptic 401."""
+    if route.provider == "mock":
+        return (None, "mock route — no auth")
+    if not route.ready():
+        return (False, "route not configured (missing base_url/model)")
+    base = route.base_url.rstrip("/")
+    if route.provider == "anthropic":
+        code = _http_status(base + "/models",
+                            {"x-api-key": route.api_key, "anthropic-version": "2023-06-01"})
+    elif "openrouter.ai" in base:                       # OpenRouter: /key is a free, auth-gated probe
+        code = _http_status(base + "/key", {"Authorization": f"Bearer {route.api_key}"})
+    else:                                               # generic OpenAI-compatible (vLLM / self-host)
+        code = _http_status(base + "/models", {"Authorization": f"Bearer {route.api_key}"})
+    if code == 200:
+        return (True, "auth ok")
+    if code in (401, 403):
+        return (False, f"auth rejected (HTTP {code}) — check the API key")
+    if code is None:
+        return (None, "could not reach the endpoint")
+    return (None, f"unexpected probe status HTTP {code}")
 
 
 def _strip_inspect_partial(text: str) -> str:

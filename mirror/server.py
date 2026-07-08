@@ -78,6 +78,27 @@ def _start_sweeper():
             time.sleep(max(15, settings.purge_interval_seconds))
     threading.Thread(target=loop, daemon=True).start()
 
+
+# Boot-time auth cache: probe each read route's key at startup so a wrong/missing key
+# fails LOUDLY in the logs here, not silently at the user's first read (Route.ready()
+# only checks that a base_url+model exist, never the key). Surfaced in /api/config.
+_ROUTE_AUTH: dict = {}
+
+
+@app.on_event("startup")
+def _check_route_auth():
+    for r in settings.routes:
+        try:
+            ok, detail = frontier.probe_auth(r)
+        except Exception as e:                          # never let a probe block startup
+            ok, detail = None, f"probe crashed: {e}"
+        _ROUTE_AUTH[r.id] = {"ok": ok, "detail": detail}
+        tag = {True: "OK", False: "FAILED", None: "unverified"}[ok]
+        msg = f"[route {r.id}] auth {tag}: {detail} (model={r.model or '-'})"
+        print(("!!! " + msg + " — reads on this route WILL fail until fixed") if ok is False
+              else msg, flush=True)
+
+
 _DECODABLE = {"image", "sticker", "audio", "video"}
 
 
@@ -339,8 +360,13 @@ def _read(job_id: str):
 # ---- API ----
 @app.get("/api/config")
 def get_config():
+    # Merge in the boot-time auth probe so a bad key is visible here, not just at read time.
+    routes = []
+    for r in settings.public_routes():
+        a = _ROUTE_AUTH.get(r["id"])
+        routes.append({**r, "auth_ok": a["ok"], "auth_detail": a["detail"]} if a else r)
     return {"hosted": settings.hosted, "frontier_ready": settings.frontier_ready(),
-            "routes": settings.public_routes(), "default_route": settings.default_route_id(),
+            "routes": routes, "default_route": settings.default_route_id(),
             "read_ttl_seconds": settings.read_ttl_seconds}
 
 

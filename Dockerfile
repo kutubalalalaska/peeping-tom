@@ -29,6 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "from nudenet import NudeDetector; NudeDetector(); print('nudenet ready')"
 
 COPY mirror ./mirror
+COPY scripts ./scripts
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 COPY --from=web /web/dist ./web
