@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Verify ANY configured read route end-to-end, with no Docker or Ollama.
 
-Runs the REAL read path — `frontier.read` with the real soul.md system prompt
-(and, for managed APIs, the ZDR hint) — over a tiny synthetic transcript, and
-times it. One real (~cents, or GPU-seconds) call confirms: the endpoint is
+Runs the REAL read path — `provider.complete` with the real soul.md system
+prompt (and, for managed APIs, the ZDR hint) — over a tiny synthetic
+transcript, and times it. One real (~cents) call confirms: the endpoint is
 reachable, the model answers, and the read comes back with [#id] citations.
-For self-host routes the elapsed time also surfaces cold-start latency.
 
 Usage (from mirror-app/, with the route's env loaded from .env):
 
@@ -21,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mirror.config import settings          # noqa: E402  (after sys.path tweak)
-from mirror import frontier                  # noqa: E402
+from mirror import protocol, provider        # noqa: E402
 
 # A small, deliberately telling transcript so the read has something real to cite.
 TRANSCRIPT = "\n".join([
@@ -57,7 +56,7 @@ def main() -> int:
     print("\nCalling the endpoint now (real call — billed ~cents)…")
     t0 = time.monotonic()
     try:
-        out = frontier.read(TRANSCRIPT, "Me", route)
+        out = provider.complete(protocol.SOUL, protocol.user_prompt(TRANSCRIPT), route)
     except Exception as e:  # noqa: BLE001 — surface the raw failure
         dt = time.monotonic() - t0
         print(f"\n✗ Read failed after {dt:.1f}s: {type(e).__name__}: {e}",
@@ -69,7 +68,7 @@ def main() -> int:
         return 1
     dt = time.monotonic() - t0
 
-    cites = frontier.citations(out)
+    _, cites, _ = protocol.validate_citations(out, 10 ** 9)
     print(f"\n--- READ (in {dt:.1f}s) ---\n" + out)
     print(f"\n--- CITATIONS --- {cites}")
     if not cites:

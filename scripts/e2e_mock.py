@@ -120,6 +120,13 @@ def main():
     unresolved = [c for c in cites if c not in got]
     check("all citations resolve", not unresolved, f"unresolved={unresolved}" if unresolved else f"{len(got)} resolved")
 
+    # The mock read always includes an invented [#99999] — server-side validation
+    # must strip it from the text and count it.
+    if res.get("route") == "mock":
+        check("invented id stripped from text", "#99999" not in read)
+        check("citations_dropped counted", (res.get("citations_dropped") or 0) >= 1,
+              f"dropped={res.get('citations_dropped')}")
+
     allm = api(a.base, f"/api/jobs/{jid}/messages")
     check("full messages list (drawer)", isinstance(allm, list) and len(allm) >= 14, f"{len(allm)} messages")
 

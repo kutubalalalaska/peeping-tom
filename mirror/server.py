@@ -22,7 +22,7 @@ from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, R
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, decode, transcript as T, frontier, jobs, budget, mediatypes, uploads
+from . import ingest, decode, transcript as T, jobs, budget, mediatypes, protocol, provider, uploads
 from .config import settings
 
 HERE = Path(__file__).parent
@@ -98,7 +98,7 @@ _ROUTE_AUTH: dict = {}
 def _check_route_auth():
     for r in settings.routes:
         try:
-            ok, detail = frontier.probe_auth(r)
+            ok, detail = provider.probe_auth(r)
         except Exception as e:                          # never let a probe block startup
             ok, detail = None, f"probe crashed: {e}"
         _ROUTE_AUTH[r.id] = {"ok": ok, "detail": detail}
@@ -266,14 +266,18 @@ def _read(job_id: str):
             return on_delta
 
         def stream_read(src_text: str, select_k: int):
-            """One streamed one-shot read → (read_body, picks). INSPECT/NOTE handled."""
-            raw = frontier.read(src_text, me, route, select_k=select_k, on_delta=mk_on_delta(), lang=lang)
-            notes, body, picks = frontier.split_stream_read(raw)
-            flush = {"partial_read": body}
-            if notes:                                # don't clobber a streamed reasoning trace
-                flush["partial_thinking"] = notes
+            """One streamed one-shot read → (read_body, picked media ids)."""
+            user = protocol.user_prompt(src_text, lang=lang, select_k=select_k,
+                                        notes=not settings.stream_reasoning)
+            raw = provider.complete(protocol.SOUL, user, route,
+                                    on_event=protocol.stream_router(mk_on_delta()),
+                                    mock_reply=lambda _u: protocol.mock_read(src_text, select_k))
+            out = protocol.parse(raw)
+            flush = {"partial_read": out.body}
+            if out.notes:                            # don't clobber a streamed reasoning trace
+                flush["partial_thinking"] = out.notes
             jobs.set_status(job_id, **flush)
-            return body, picks
+            return out.body, [i for r in out.requests for i in r.ids]
 
         # Decide the read strategy (SCALING.md size gate): one-shot, or — for a corpus
         # too big for the context window — chronological MAP-REDUCE.
@@ -288,6 +292,7 @@ def _read(job_id: str):
                         message="the frontier model is reading your chat…")
 
         inspected, first_read, final = [], None, None
+        dropped_total = [0]                          # invalid citations stripped (observability)
         if plan["tier"] >= 3:
             # MAP-REDUCE (SCALING.md Stage 3): read chronological slices, then synthesise.
             # Stage 4: each era may deepen a few of ITS OWN images (budget distributed
@@ -305,9 +310,22 @@ def _read(job_id: str):
                                 eta_seconds=eta, eta_phase="reading")
                 era_msgs = msgs_all[s:e]
                 slice_text, _ = T.assemble_compact(era_msgs, media_all)
-                k = (min(settings.images_per_era, settings.max_inspect_images_total - len(inspected))
-                     if settings.iterative_discovery else 0)
-                era_text, picks = frontier.read_era(slice_text, route, idx + 1, n, select_k=max(0, k))
+                k = max(0, (min(settings.images_per_era, settings.max_inspect_images_total - len(inspected))
+                            if settings.iterative_discovery else 0))
+
+                def read_era(text, select_k):
+                    user = protocol.era_prompt(text, idx + 1, n, select_k=select_k)
+                    raw = provider.complete(
+                        protocol.SOUL, user, route,
+                        mock_reply=lambda _u: protocol.mock_era(_u, transcript=text, select_k=select_k))
+                    out = protocol.parse(raw)
+                    # Validate here, not just at the end: an invented id must not
+                    # survive the era→synthesis hop and resurface in the final read.
+                    body, _, dr = protocol.validate_citations(out.body, len(msgs_all))
+                    dropped_total[0] += dr
+                    return body, [i for r in out.requests for i in r.ids]
+
+                era_text, picks = read_era(slice_text, select_k=k)
                 files = _image_files_for_ids(job_id, picks) if picks else []
                 if files:                                # deepen this era's flagged images, then re-read it
                     jobs.set_status(job_id, message=f"era {idx + 1}/{n}: opening {len(files)} image(s) the read flagged…")
@@ -317,14 +335,17 @@ def _read(job_id: str):
                     jobs.path(job_id, "media.json").write_text(json.dumps(media_all, ensure_ascii=False, indent=2))
                     inspected += [nm for nm, rc in deep.items() if rc.get("caption")]
                     slice_text, _ = T.assemble_compact(era_msgs, media_all)
-                    era_text, _ = frontier.read_era(slice_text, route, idx + 1, n, select_k=0)
+                    era_text, _ = read_era(slice_text, select_k=0)
                 eras.append((span, era_text))
                 jobs.set_status(job_id, partial_read="\n\n".join(
                     f"[era {i + 1}/{n} · {lab}]\n{t}" for i, (lab, t) in enumerate(eras)))
             # the deepened captions changed the transcript — persist what actually crossed
             jobs.path(job_id, "transcript.txt").write_text(T.assemble_for_read(msgs_all, media_all))
             jobs.set_status(job_id, message=f"synthesising the arc across {n} eras…")
-            final = frontier.synthesize(eras, route, on_delta=mk_on_delta(), lang=lang)
+            raw = provider.complete(protocol.SOUL, protocol.synth_prompt(eras, lang), route,
+                                    on_event=protocol.stream_router(mk_on_delta()),
+                                    mock_reply=protocol.mock_era)
+            final = protocol.parse(raw).body
             jobs.set_status(job_id, partial_read=final)
             first_read = final
         else:
@@ -362,12 +383,20 @@ def _read(job_id: str):
                 jobs.set_status(job_id, message="re-reading with the photos in view…")
                 final, _ = stream_read(text, select_k=0)
 
+        # The citation choke point: every id the read cites must exist. Invented
+        # ids are stripped from the text HERE, before anything is persisted — the
+        # frontend never has to grey out or silently drop a chip again.
+        final, citations, dropped = protocol.validate_citations(final or "", len(msgs_all))
+        dropped += dropped_total[0]
+        if dropped:
+            print(f"[read] stripped {dropped} invalid citation id(s)", flush=True)
+
         # Self-destruct: the read is now READY, so start its TTL countdown here (not
         # at upload) — the result page counts down to this `expires_at`, after which
         # the sweeper deletes the whole job. Only on the hosted tier.
         expires_at = (time.time() + settings.read_ttl_seconds) if settings.hosted else None
         jobs.path(job_id, "read.json").write_text(json.dumps(
-            {"me": me, "read": final, "citations": frontier.citations(final),
+            {"me": me, "read": final, "citations": citations, "citations_dropped": dropped,
              "route": route.id, "model": route.model, "expires_at": expires_at,
              "first_read": first_read, "inspected": inspected, "deep_count": len(inspected)},
             ensure_ascii=False, indent=2))
@@ -378,7 +407,7 @@ def _read(job_id: str):
                         "transcript_deleted_at": time.strftime("%H:%M:%S")}
         jobs.set_status(job_id, state="done", message="read ready", expires_at=expires_at, eta_seconds=None,
                         deletion=deletion, deep_count=len(inspected), retained=jobs.retained(job_id))
-    except frontier.NotConfigured as e:
+    except provider.NotConfigured as e:
         jobs.set_status(job_id, state="needs_config", message=str(e))
     except Exception as e:
         jobs.set_status(job_id, state="error", message=f"read failed: {e}")
