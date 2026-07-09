@@ -38,32 +38,17 @@ function ChatBubbles({
   );
 }
 
-// Compact clickable citation chips — for LONG citation runs and for any id that
-// didn't resolve to a fetched message (so a reference is NEVER dropped or leaked as
-// raw text). A resolvable id opens the drawer; an unresolvable one is shown muted.
-function CiteChips({
-  ids,
-  msgs,
-  onOpen,
-}: {
-  ids: number[];
-  msgs: Record<number, ReceiptMessage>;
-  onOpen: (id: number) => void;
-}) {
-  const { t } = useT();
+// Compact clickable citation chips — for LONG citation runs. Each opens the context
+// drawer at that message. Only resolvable ids reach here; unresolvable refs are
+// dropped upstream (a greyed, non-clickable badge just confused readers).
+function CiteChips({ ids, onOpen }: { ids: number[]; onOpen: (id: number) => void }) {
   return (
     <span className="cites">
-      {ids.map((id) =>
-        msgs[id] ? (
-          <button key={id} className="cite" onClick={() => onOpen(id)}>
-            #{id}
-          </button>
-        ) : (
-          <span key={id} className="cite dead" title={t("drawer.notFound")}>
-            #{id}
-          </span>
-        )
-      )}
+      {ids.map((id) => (
+        <button key={id} className="cite" onClick={() => onOpen(id)}>
+          #{id}
+        </button>
+      ))}
     </span>
   );
 }
@@ -78,9 +63,9 @@ const isCite = (tok: string) => /\[#\s*\d+/.test(tok);
 const idsIn = (tok: string) => [...new Set((tok.match(/\d+/g) || []).map(Number))];
 
 // The read: flowing prose. A SHORT citation run resolves to inline chat-bubble
-// evidence; a LONG run — or any id that didn't resolve — becomes clickable chips
-// (never dropped, never leaked as raw text). Bubbles and chips both open the
-// context drawer at that message. `##` lines degrade to a light subheading.
+// evidence; a LONG run becomes clickable chips. Both open the context drawer at
+// that message. Unresolvable ids are dropped entirely (no confusing greyed badge);
+// malformed multi-id brackets still parse. `##` lines become a subheading.
 function renderRead(
   text: string,
   msgs: Record<number, ReceiptMessage>,
@@ -100,10 +85,12 @@ function renderRead(
     }
     b.split(CITE_RUN).forEach((tok, ti) => {
       if (isCite(tok)) {
-        const ids = idsIn(tok);
-        const resolvable = ids.filter((id) => msgs[id]);
+        // Only VALID refs are shown; unresolvable ids are dropped entirely. Short
+        // run -> inline bubbles, long run -> compact chips.
+        const resolvable = idsIn(tok).filter((id) => msgs[id]);
+        if (resolvable.length === 0) return;
         const key = "c" + bi + "_" + ti;
-        if (ids.length <= BUBBLE_CAP && resolvable.length > 0) {
+        if (resolvable.length <= BUBBLE_CAP) {
           out.push(
             <ChatBubbles
               key={key}
@@ -113,10 +100,8 @@ function renderRead(
               onOpen={onOpen}
             />
           );
-          const dead = ids.filter((id) => !msgs[id]);
-          if (dead.length) out.push(<CiteChips key={key + "d"} ids={dead} msgs={msgs} onOpen={onOpen} />);
         } else {
-          out.push(<CiteChips key={key} ids={ids} msgs={msgs} onOpen={onOpen} />);
+          out.push(<CiteChips key={key} ids={resolvable} onOpen={onOpen} />);
         }
       } else {
         const p = tok.trim();

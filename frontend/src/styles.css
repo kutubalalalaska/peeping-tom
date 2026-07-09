@@ -161,7 +161,7 @@ button { font: inherit; cursor: pointer; }
 /* ---- the read ---- */
 .read p { font-size: 16px; line-height: 1.85; margin: 22px 0 0; }
 .read .lede { font-size: clamp(19px, 2.6vw, 24px); font-weight: 500; line-height: 1.25; margin-top: 0; }
-.read .subhead { font-size: 13px; font-weight: 500; color: var(--secondary); margin: 30px 0 0; }
+.read .subhead { font-size: 18px; font-weight: 600; color: var(--ink); margin: 34px 0 4px; letter-spacing: -.01em; }
 
 /* cited messages, rendered inline as chat bubbles — the one styled element the
    read carries. A scoped, deliberate nod to the source app (rounded corners with
@@ -307,7 +307,6 @@ button { font: inherit; cursor: pointer; }
   letter-spacing: .02em; vertical-align: baseline;
 }
 .cite:hover { border-color: var(--ink); color: var(--ink); }
-.cite.dead { cursor: default; color: var(--placeholder); border-color: var(--hairline); }
 
 /* ---- clickable bubbles + the focused (cited) one ---- */
 .bubble.clickable { cursor: pointer; }
