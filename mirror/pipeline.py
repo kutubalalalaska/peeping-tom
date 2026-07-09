@@ -244,7 +244,8 @@ def _fulfil(ctx, requests, max_items, max_audio_s):
     def on_item(name, rec, _done, _total):
         rec = {k: v for k, v in rec.items() if k != "_t"}
         media.setdefault(name, {}).update(rec)
-        state["done"] += 1
+        # escalated clips re-emit a corrected transcript — don't count past total
+        state["done"] = min(state["done"] + 1, total)
         eta = None
         if state["done"] < total:
             eta = round((time.monotonic() - t0) / state["done"] * (total - state["done"]))
