@@ -459,8 +459,11 @@ def _deep_fold(ctx):
             consumed += len(batch)
             rounds += 1
             total_ev = (st.get("decode") or {}).get("total")
+            # `consumed` counts evidence LINES; escalated clips re-emit a corrected
+            # line, so it can exceed the item total — clamp the display.
             jobs.set_status(job_id, phase="folding",
-                            fold={"round": rounds, "evidence_seen": consumed,
+                            fold={"round": rounds,
+                                  "evidence_seen": min(consumed, total_ev) if total_ev else consumed,
                                   "evidence_total": total_ev},
                             message=f"revising the read with {len(batch)} new pieces of evidence…")
             ev = T.render_evidence(ctx["msgs_by_id"], batch)
