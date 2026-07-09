@@ -18,27 +18,50 @@ from .config import settings
 from .mediatypes import kind
 
 
+def _mss(s) -> str:
+    s = int(round(s or 0))
+    return f"{s // 60}:{s % 60:02d}"
+
+
 def _attach_label(fname: str, media: dict) -> str:
+    """One media file → its transcript label. Decoded content wins; an undecoded
+    file with manifest metadata renders as an informative placeholder the read
+    can reason about (and request); bare labels are the last resort."""
     rec = media.get(fname) or media.get(os.path.basename(fname)) or {}
     k = kind(fname)
     if k == "audio":
         t = rec.get("transcript")
-        return f'[voice message: "{t}"]' if t else "[voice message]"
+        if t:
+            return f'[voice message: "{t}"]'
+        if rec.get("seconds"):
+            return f"[voice {_mss(rec['seconds'])} — undecoded]"
+        return "[voice message]"
     if k == "sticker":
         c = rec.get("caption")
-        return f"[sticker: {c}]" if c else "[sticker]"
+        return f"[sticker: {c}]" if c else "[sticker — undecoded]"
     if k == "video":
         c = rec.get("caption") or "; ".join(rec.get("frame_captions", []))
         if rec.get("transcript"):
             c = (c + " | said: " + rec["transcript"]) if c else "said: " + rec["transcript"]
-        return f"[video: {c}]" if c else "[video]"
+        if c:
+            return f"[video: {c}]"
+        note = "video note" if rec.get("video_note") else "video"
+        if rec.get("seconds"):
+            return f"[{note} {_mss(rec['seconds'])} — undecoded]"
+        if rec.get("bytes"):
+            return f"[{note} {max(1, rec['bytes'] // 1_000_000)}MB — undecoded]"
+        return f"[{note}]"
     if k == "image":
         if rec.get("explicit"):
             # Neutral marker only — the graphic caption is never produced/stored, so
             # nothing intimate crosses the boundary. The fact of the image is the signal.
             return f"[{rec.get('marker') or 'intimate/explicit image'}]"
         c = rec.get("caption") or rec.get("tag")
-        return f"[image: {c}]" if c else "[image]"
+        if c:
+            return f"[image: {c}]"
+        if rec.get("w"):
+            return f"[image {rec['w']}×{rec['h']} — undecoded]"
+        return "[image]"
     return f"[document: {os.path.basename(fname)}]"
 
 
@@ -102,12 +125,30 @@ def assemble_compact(messages, media: dict):
     return "\n".join(out), legend
 
 
-def assemble_for_read(messages, media: dict) -> str:
-    """The transcript that crosses to the read — compact when COMPACT_TRANSCRIPT is on,
-    else the full form. (Receipts/citations use messages.json, so they're unaffected.)"""
-    if settings.compact_transcript:
-        return assemble_compact(messages, media)[0]
-    return assemble(messages, media)
+def assemble_for_read(messages, media: dict, header: str = "") -> str:
+    """The transcript that crosses to the read (+ an optional MEDIA MANIFEST
+    header). Compact when COMPACT_TRANSCRIPT is on, else the full form.
+    (Receipts/citations use messages.json, so they're unaffected.)"""
+    body = assemble_compact(messages, media)[0] if settings.compact_transcript \
+        else assemble(messages, media)
+    return f"{header}\n\n{body}" if header else body
+
+
+def render_evidence(msgs_by_id: dict, items: list) -> str:
+    """Fold-round delta: evidence lines for freshly-decoded media, rendered as the
+    same `#id [ts] sender: [label]` shape the read already knows. `items` are
+    evidence records {file, ids, rec}."""
+    lines, seen = [], set()
+    for it in items:
+        media_one = {it["file"]: it.get("rec") or {}}
+        for i in it.get("ids") or []:
+            m = msgs_by_id.get(i)
+            if m is None or i in seen:
+                continue
+            seen.add(i)
+            lines.append(f"#{m.id} [{m.ts}] {m.sender}: "
+                         f"{(m.text + ' ') if m.text else ''}{_attach_label(it['file'], media_one)}")
+    return "\n".join(lines)
 
 
 def stats(messages, media: dict) -> dict:

@@ -53,7 +53,7 @@ services:
       EPHEMERAL: "0"
       COOKIE_SECURE: "1"
       READ_TTL_SECONDS: "600"             # read self-destructs 10 min after it's ready
-      MAX_JOB_AGE_SECONDS: "3600"         # garbage sweep for never-finished jobs
+      MAX_JOB_AGE_SECONDS: "21600"        # garbage backstop (6h) — the sweeper never kills a heartbeating job
       PURGE_INTERVAL_SECONDS: "120"
       RATE_MAX_PER_SESSION: "5"
       RATE_MAX_PER_IP: "20"

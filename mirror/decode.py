@@ -1,22 +1,22 @@
 """Local media decoder — runs entirely on the machine (privacy boundary).
 
-Two-pass design (cost follows value):
-  - decode_media  = the CHEAP-ALL pass: every image/sticker/video gets a caption
-                    from a small VLM (VISION_MODEL_FAST) at a small resolution.
-                    Audio -> Whisper. This is what the first read sees.
-  - decode_deep   = the DEEP pass: re-caption only the images the FRONTIER read
-                    selected, on the big VLM (VISION_MODEL) at full resolution.
-                    Often 0 images — the read escalates only when it would matter.
+Two entrypoints, driven by the pipeline orchestrator:
+  - decode_speech = Whisper for voice notes + video speech. ONE model load per
+                    batch; tiered-ASR escalation (garbage transcripts re-run on
+                    a bigger model, worst-first, capped) at batch end.
+  - decode_images = the VLM for images/stickers (+ video keyframes on the cheap
+                    pass). deep=False is the cheap-all pass (small px, one
+                    classify+caption call); deep=True is the read-REQUESTED look
+                    (full px, rich caption). NudeNet gates BOTH before any
+                    caption call — explicit images carry a neutral marker only.
 
 Speed levers: the image *encode* is the cost, so we (a) resize before the VLM,
-(b) do ONE call per image (classify + caption together), (c) use a small model
-for the all-images pass and reserve the big model for the picked few, (d) keep
-the model warm and bound generation. The captioner stays BLIND — it never sees
-surrounding messages; the frontier selecting which images to deepen does not feed
-context into the caption, so each caption is still independent evidence.
+(b) do ONE call per image, (c) keep the model warm and bound generation. The
+captioner stays BLIND — it never sees surrounding messages, so each caption is
+independent evidence.
 
-Vision goes to the bundled Ollama service; audio uses faster-whisper. Images run
-through a thread pool; decode reports per-item progress and prints a timing line.
+Vision goes to the bundled Ollama service; audio uses faster-whisper. Both
+entrypoints report per-item progress and honor an optional wall-clock deadline.
 """
 
 import base64, gc, json, re, subprocess, time, urllib.request
@@ -375,113 +375,174 @@ def _suspect_transcript(text: str, q, language: str):
     return None
 
 
-def decode_media(files, work: Path, on_progress=None, language: str = None, on_reinspect=None) -> dict:
-    """CHEAP-ALL pass. files: list[Path]. Returns {filename: record}. After each
-    decoded item calls on_progress(done, total, item={file,type,caption|None}).
-    Images/stickers/video use the small VISION_MODEL_FAST at decode_max_px_fast.
-    Voice notes AND video messages are Whisper-transcribed (their speech is data);
-    video keyframes (the visual) are captioned only in cheap-all mode, not at scale.
-    `language` (ISO code or None) is passed to Whisper for all speech (None = auto)."""
-    work.mkdir(parents=True, exist_ok=True)
-    wall0 = time.monotonic()
-    fast_model = settings.vision_model_fast or settings.vision_model
-    fast_px = settings.decode_max_px_fast
-    by = {}
-    for f in files:
-        by.setdefault(file_type(f), []).append(f)
-    out = {}
+def decode_images(files, work: Path, deep: bool = False, on_item=None, deadline=None) -> dict:
+    """Caption images/stickers (and, cheap pass only, video KEYFRAMES) on the VLM.
 
-    img_jobs = [(f, "image") for f in by.get("image", [])] + [(f, "sticker") for f in by.get("sticker", [])]
-    total = len(img_jobs) + len(by.get("audio", [])) + len(by.get("video", []))
+    deep=False — the cheap-all pass: small px, one COMBINED classify+caption call.
+    deep=True  — the read REQUESTED these: full px, DEEP_GUARDED rich caption.
+    Both paths run the NudeNet gate FIRST (marker instead of caption; the graphic
+    description is never generated). `on_item(name, rec, done, total)` fires per
+    file; `deadline` (a time.monotonic() stamp) bounds the batch — whatever isn't
+    done by then is marked skipped, never stalls the pipeline."""
+    import concurrent.futures as _cf
+    work.mkdir(parents=True, exist_ok=True)
+    files = list(files)
+    out = {}
+    if not files:
+        return out
+    wall0 = time.monotonic()
+    model = settings.vision_model_fast or settings.vision_model
+    px = settings.decode_max_px if deep else settings.decode_max_px_fast
+
+    def one(f):
+        k = file_type(f)
+        if k == "video":                          # visual keyframes (cheap pass only)
+            rec = {"type": "video"}
+            try:
+                caps = []
+                for fr in _keyframes(f, work):
+                    view, _ = _prep_image(fr, work, px)
+                    c, _ = _vlm(view, FRAME, num_predict=48, model=model)
+                    caps.append(c)
+                if caps:
+                    rec["frame_captions"] = caps
+            except Exception as e:
+                rec["error"] = str(e)
+            return f.name, rec
+        if not deep:
+            return _decode_image(f, "sticker" if k == "sticker" else "image", work, model, px)
+        # deep: a richer look at what the read asked to see
+        view, _ = (_prep_image(f, work, px) if settings.vision_backend != "mock" else (f, 0.0))
+        if k == "sticker":
+            cap, _ = _vlm(view, STICKER, num_predict=48, model=model)
+            return f.name, {"type": "sticker", "caption": cap, "tier": "deep"}
+        if settings.mark_explicit and is_explicit_image(view):
+            return f.name, {"type": "image", "explicit": True,
+                            "marker": settings.explicit_marker, "tier": "explicit"}
+        text, _ = _vlm(view, DEEP_GUARDED, num_predict=settings.vision_num_predict, model=model)
+        _, _, explicit, caption = _parse_combined(text)
+        if settings.mark_explicit and explicit:        # VLM self-report as a secondary backup
+            return f.name, {"type": "image", "explicit": True,
+                            "marker": settings.explicit_marker, "tier": "explicit"}
+        if _is_refusal(caption):
+            return f.name, {"type": "image", "tier": "tag"}   # never leak a refusal string
+        return f.name, {"type": "image", "caption": caption, "tier": "deep"}
+
     done = 0
 
-    def step(name: str, rec: dict):
+    def step(name, rec):
         nonlocal done
         done += 1
         out[name] = rec
-        if on_progress:
-            on_progress(done, total, {"file": name, "type": rec.get("type", "image"),
-                                      "caption": _caption_of(rec)})
+        if on_item:
+            on_item(name, rec, done, len(files))
 
-    # images + stickers, parallel, on the small model
-    with ThreadPoolExecutor(max_workers=settings.decode_workers) as ex:
-        futs = {ex.submit(_decode_image, f, k, work, fast_model, fast_px): (f, k) for f, k in img_jobs}
-        for fut in as_completed(futs):
-            f, k = futs[fut]
+    ex = ThreadPoolExecutor(max_workers=settings.decode_workers)
+    futs = {ex.submit(one, f): f for f in files}
+    budget = (deadline - time.monotonic()) if deadline else None
+    try:
+        for fut in as_completed(futs, timeout=max(5, budget) if budget is not None else None):
+            f = futs[fut]
             try:
                 name, rec = fut.result()
             except Exception as e:
-                name, rec = f.name, {"type": "sticker" if k == "sticker" else "image", "error": str(e)}
+                name, rec = f.name, {"type": file_type(f), "error": str(e)}
             step(name, rec)
+    except _cf.TimeoutError:
+        for fut, f in futs.items():                 # out of time → skip, don't stall
+            if f.name not in out:
+                step(f.name, {"type": file_type(f), "error": "decode budget exhausted (skipped)"})
+                print(f"[decode/images] {f.name} | SKIPPED (batch deadline)", flush=True)
+    ex.shutdown(wait=False)
+    _timing_summary(out, (time.monotonic() - wall0) * 1000, model, px)
+    return out
 
-    # speech: voice notes + video messages share one Whisper load.
-    audio_files = list(by.get("audio", []))
-    video_files = list(by.get("video", []))
-    suspects = []                                    # (severity, reason, duration_s, file, rec)
+
+def decode_speech(files, work: Path, language: str = None, on_item=None,
+                  on_reinspect=None, deadline=None) -> dict:
+    """Whisper-transcribe voice notes + video speech. ONE model load for the whole
+    batch (the aborted audio-on-demand branch died on per-batch reloads). Video:
+    round notes always; shared clips only under video_max_mb. Tiered-ASR
+    escalation runs at batch end (worst-first, capped) unless the deadline has
+    passed. `on_item(name, rec, done, total)` per clip; escalated clips re-emit
+    both via on_item (evidence) and on_reinspect (the UI's second-look counter)."""
+    work.mkdir(parents=True, exist_ok=True)
+    files = list(files)
+    out = {}
+    if not files:
+        return out
+    done = 0
+
+    def step(name, rec):
+        nonlocal done
+        done += 1
+        out[name] = rec
+        if on_item:
+            on_item(name, rec, done, len(files))
+
     if settings.vision_backend == "mock":
-        for f in audio_files:
-            step(f.name, {"type": "audio", "transcript": f"[mock transcript {f.stem[-6:]}]"})
-    else:
-        wm = None
-        if audio_files or (video_files and settings.transcribe_video):
-            try:
-                from faster_whisper import WhisperModel
-                wm = WhisperModel(settings.whisper_model, device="cpu", compute_type="int8")
-            except Exception as e:
-                for f in audio_files:
-                    step(f.name, {"type": "audio", "error": f"voice-note decode unavailable: {e}"})
-        for f in audio_files:
-            if wm is None:
-                break                                # already error-stepped above
-            try:
-                tx, q = _transcribe(f, work, wm, language)
-                rec = {"type": "audio", "transcript": tx}
-                flag = _suspect_transcript(tx, q, language)
-                if flag:
-                    suspects.append((flag[0], flag[1], q["duration"], f, rec))
-            except Exception as e:
-                rec = {"type": "audio", "error": str(e)}
-            step(f.name, rec)
+        for f in files:
+            if file_type(f) == "audio":
+                step(f.name, {"type": "audio", "transcript": f"[mock transcript {f.stem[-6:]}]"})
+            elif settings.transcribe_video:
+                step(f.name, {"type": "video", "transcript": f"[mock video speech {f.stem[-6:]}]"})
+            else:
+                step(f.name, {"type": "video"})
+        return out
 
-    # video: transcribe the SPEECH (talking video messages), + keyframe the visual only in
-    # cheap-all mode (skipped at scale — iterative mode leaves frames to the deep pass).
+    audio_files = [f for f in files if file_type(f) == "audio"]
+    video_files = [f for f in files if file_type(f) == "video"]
+    wm = None
+    if audio_files or (video_files and settings.transcribe_video):
+        try:
+            from faster_whisper import WhisperModel
+            wm = WhisperModel(settings.whisper_model, device="cpu", compute_type="int8")
+        except Exception as e:
+            for f in files:
+                step(f.name, {"type": file_type(f), "error": f"speech decode unavailable: {e}"})
+            return out
+
+    suspects = []                                    # (severity, reason, duration_s, file, rec)
+    for f in audio_files:
+        if deadline and time.monotonic() > deadline:
+            step(f.name, {"type": "audio", "error": "decode budget exhausted (skipped)"}); continue
+        try:
+            tx, q = _transcribe(f, work, wm, language)
+            rec = {"type": "audio", "transcript": tx}
+            flag = _suspect_transcript(tx, q, language)
+            if flag:
+                suspects.append((flag[0], flag[1], q["duration"], f, rec))
+        except Exception as e:
+            rec = {"type": "audio", "error": str(e)}
+        step(f.name, rec)
+
     for f in video_files:
         rec = {"type": "video"}
-        if settings.vision_backend == "mock":
-            if settings.transcribe_video:
-                rec["transcript"] = f"[mock video speech {f.stem[-6:]}]"
-        else:
-            if settings.transcribe_video and wm is not None:
-                if is_video_note(f) or f.stat().st_size <= settings.video_max_mb * 1_000_000:
-                    try:
-                        tx, q = _transcribe(f, work, wm, language)
-                        if tx:
-                            rec["transcript"] = tx
-                        flag = _suspect_transcript(tx, q, language)
-                        if flag:
-                            suspects.append((flag[0], flag[1], q["duration"], f, rec))
-                    except Exception as e:
-                        rec["error"] = str(e)
-            if not settings.iterative_discovery:     # visual frames only for small (cheap-all) chats
+        if settings.transcribe_video and wm is not None and \
+                (is_video_note(f) or f.stat().st_size <= settings.video_max_mb * 1_000_000):
+            if deadline and time.monotonic() > deadline:
+                rec["error"] = "decode budget exhausted (skipped)"
+            else:
                 try:
-                    caps = []
-                    for fr in _keyframes(f, work):
-                        view, _ = _prep_image(fr, work, fast_px)
-                        c, _ = _vlm(view, FRAME, num_predict=48, model=fast_model)
-                        caps.append(c)
-                    if caps:
-                        rec["frame_captions"] = caps
+                    tx, q = _transcribe(f, work, wm, language)
+                    if tx:
+                        rec["transcript"] = tx
+                    flag = _suspect_transcript(tx, q, language)
+                    if flag:
+                        suspects.append((flag[0], flag[1], q["duration"], f, rec))
                 except Exception as e:
-                    rec.setdefault("error", str(e))
+                    rec["error"] = str(e)
+        if rec.get("video_note") is None and is_video_note(f):
+            rec["video_note"] = True
         step(f.name, rec)
 
     # Tiered ASR escalation: re-run the clips whose pass-1 transcript scored as garbage on
-    # the bigger model — worst-first, under a cap on total re-run audio (a pathological chat
-    # can't turn decode into an all-nighter). The small model is freed before the big one
-    # loads, so peak RAM stays ≈ one model. Fail-open: any failure here (model download,
-    # OOM) keeps the pass-1 transcripts and logs loudly — never kills the decode.
+    # the bigger model — worst-first, under a cap on total re-run audio. The small model is
+    # freed before the big one loads, so peak RAM stays ≈ one model. Fail-open: any failure
+    # keeps the pass-1 transcripts and logs loudly — never kills the decode.
     esc = settings.whisper_escalate_model.strip()
-    if suspects and esc and esc != settings.whisper_model:
+    if suspects and esc and esc != settings.whisper_model and wm is not None \
+            and not (deadline and time.monotonic() > deadline):
         try:
             suspects.sort(key=lambda s: s[0])
             cap = settings.whisper_escalate_max_s
@@ -493,9 +554,8 @@ def decode_media(files, work: Path, on_progress=None, language: str = None, on_r
                     budget -= dur
             if chosen:
                 t0 = time.monotonic()
-                # Announce the re-inspection phase up front — BEFORE the big model loads
-                # (slow on CPU) — so the UI switches to its own "re-checking" counter
-                # immediately instead of sitting pinned at N/N while clips re-flow.
+                # Announce the phase BEFORE the big model loads (slow on CPU) so the
+                # UI switches to its own "re-checking" counter immediately.
                 if on_reinspect:
                     on_reinspect(0, len(chosen), None)
                 from faster_whisper import WhisperModel
@@ -509,11 +569,10 @@ def decode_media(files, work: Path, on_progress=None, language: str = None, on_r
                             rec["transcript"] = tx2
                             fixed += 1
                         rec["asr"] = {"escalated": esc, "reason": reason}
+                        if on_item:                    # corrected transcript = fresh evidence
+                            on_item(f.name, rec, len(files), len(files))
                     except Exception:
-                        pass                         # keep the pass-1 text for this clip
-                    # Report to the re-inspection channel (NOT on_progress) with its OWN
-                    # done/total, so a re-checked clip is framed as a second look, not a
-                    # duplicate first pass. Always advances — a failed clip still counts.
+                        pass                           # keep the pass-1 text for this clip
                     if on_reinspect:
                         on_reinspect(i + 1, len(chosen), {"file": f.name, "type": rec.get("type"),
                                                           "caption": _caption_of(rec), "reinspected": True})
@@ -523,68 +582,4 @@ def decode_media(files, work: Path, on_progress=None, language: str = None, on_r
         except Exception as e:
             print(f"[whisper] escalation FAILED (keeping pass-1 transcripts): {e}", flush=True)
 
-    for f in by.get("document", []):
-        out.setdefault(f.name, {"type": "document"})
-
-    _timing_summary(out, (time.monotonic() - wall0) * 1000, fast_model, fast_px)
-    return out
-
-
-def decode_deep(files, work: Path, on_progress=None) -> dict:
-    """DEEP pass. Re-caption the frontier-SELECTED images on the small/fast model
-    (the 3B) at full resolution with the DETAILED prompt — a richer look at the few
-    images the read asked to see (no big-model tier; the 3B is enough, per the
-    baseline). Returns {filename: {caption, tier:'deep'}} to merge into media.json.
-    Runs in parallel and is bounded: a hung/bad image is skipped, never stalls the batch.
-
-    SELF-GUARDED: the deep pass classifies EXPLICIT itself (DEEP_GUARDED prompt) and
-    drops an explicit image to the neutral marker in code — so nothing graphic crosses
-    even in iterative-discovery mode, where no prior cheap-all flag exists. The server
-    also skips already-flagged explicit files in _image_files_for_ids (defense in depth)."""
-    import concurrent.futures as _cf
-    work.mkdir(parents=True, exist_ok=True)
-    model = settings.vision_model_fast or settings.vision_model
-    out, files = {}, list(files)
-    if not files:
-        return out
-
-    def one(f):
-        view, _ = (_prep_image(f, work, settings.decode_max_px)
-                   if settings.vision_backend != "mock" else (f, 0.0))
-        # NSFW GATE FIRST (dedicated detector): if flagged, marker + SKIP the caption call
-        # — the graphic description is never generated. This is the real guard the deep
-        # path needs (the VLM's own EXPLICIT self-report misses real nudes).
-        if settings.mark_explicit and is_explicit_image(view):
-            return {"explicit": True, "marker": settings.explicit_marker, "tier": "explicit", "_ms": 0}
-        text, ms = _vlm(view, DEEP_GUARDED, num_predict=settings.vision_num_predict, model=model)
-        _, _, explicit, caption = _parse_combined(text)
-        if settings.mark_explicit and explicit:        # VLM self-report as a secondary backup
-            return {"explicit": True, "marker": settings.explicit_marker, "tier": "explicit", "_ms": ms}
-        if _is_refusal(caption):
-            return {"tier": "tag", "_ms": ms}        # don't leak a refusal string as a caption
-        return {"caption": caption, "tier": "deep", "_ms": ms}
-
-    ex = ThreadPoolExecutor(max_workers=settings.decode_workers)
-    futs = {ex.submit(one, f): f for f in files}
-    budget = settings.vision_timeout * 2 + 30           # overall wall budget for the (parallel) batch
-    done = 0
-    try:
-        for fut in as_completed(futs, timeout=budget):
-            f = futs[fut]; done += 1
-            try:
-                rec = fut.result(); ms = rec.pop("_ms", 0); out[f.name] = rec
-                if settings.vision_backend != "mock":
-                    print(f"[decode/deep] {f.name} | {ms/1000:.1f}s", flush=True)
-            except Exception as e:
-                out[f.name] = {"error": str(e)}
-                if settings.vision_backend != "mock":
-                    print(f"[decode/deep] {f.name} | ERROR: {e}", flush=True)
-            if on_progress:
-                on_progress(done, len(files), {"file": f.name, "type": "image", "caption": out[f.name].get("caption")})
-    except _cf.TimeoutError:
-        for fut, f in futs.items():                     # whatever didn't finish in time → skip, don't stall
-            if f.name not in out:
-                out[f.name] = {"error": "deep timeout (skipped)"}
-                print(f"[decode/deep] {f.name} | SKIPPED (batch timeout)", flush=True)
-    ex.shutdown(wait=False)
     return out

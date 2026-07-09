@@ -93,9 +93,11 @@ def main():
     jid = upload(a.base, build_zip(), mode=a.mode)["job_id"]
     print(f"[e2e] job {jid}")
 
-    seen, status, t0 = [], {}, time.time()
+    seen, status, phases, t0 = [], {}, set(), time.time()
     while time.time() - t0 < a.timeout:
         status = api(a.base, f"/api/jobs/{jid}")
+        if status.get("phase"):
+            phases.add(status["phase"])
         key = (status.get("state"), status.get("phase"), status.get("message"))
         if not seen or key != seen[-1]:
             seen.append(key)
@@ -103,7 +105,7 @@ def main():
             print(f"  [{time.time()-t0:5.1f}s] {key[0]}{ph}: {key[2]}")
         if status.get("state") in ("done", "error", "needs_config"):
             break
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     check("reaches done", status.get("state") == "done", f"final state={status.get('state')}")
     if status.get("state") != "done":
@@ -140,7 +142,26 @@ def main():
     check("retained readout", isinstance(ret, dict) and "read" in ret, json.dumps(ret))
 
     if res.get("mode") or a.mode:
-        check("result carries mode", res.get("mode") == (a.mode or "fast"), f"mode={res.get('mode')}")
+        want_mode = a.mode or "fast"
+        check("result carries mode", res.get("mode") == want_mode, f"mode={res.get('mode')}")
+        if want_mode == "fast":
+            reqs = status.get("media_requests") or []
+            check("media_requests published", len(reqs) >= 1, f"{len(reqs)} requests")
+            check("request carries a reason", any((r.get("reason") or "").strip() for r in reqs),
+                  json.dumps(reqs)[:200])
+            check("requests resolved (done/skipped)",
+                  all(r.get("status") in ("done", "skipped") for r in reqs), json.dumps(reqs)[:200])
+        if want_mode == "deep":
+            dec = status.get("decode") or {}
+            check("background decode ran", (dec.get("done") or 0) >= 4, json.dumps(dec))
+            check("decode finished", bool(status.get("decode_done")))
+            if (status.get("plan") or {}).get("tier", 1) < 3:
+                # tier-3 deep folds via era snapshots instead of fold rounds
+                fold = status.get("fold") or {}
+                check("at least one fold round", (fold.get("round") or 0) >= 1, json.dumps(fold))
+        # (tiny fixtures blow through phases between polls — require the anchors)
+        check("phases were machine-readable", {"parsing", "done"} <= phases and len(phases) >= 3,
+              f"saw {sorted(phases)}")
 
     if not a.keep:
         d = api(a.base, f"/api/jobs/{jid}", method="DELETE")

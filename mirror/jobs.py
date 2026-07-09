@@ -64,6 +64,34 @@ def get_status(job_id: str):
     return json.loads(f.read_text()) if f.exists() else None
 
 
+def append_evidence(job_id: str, item: dict):
+    """Append ONE evidence record (a freshly-decoded media item) to the job's
+    evidence.jsonl. Single writer (the decode producer), one write() per line —
+    the reader tolerates a partial trailing line."""
+    line = json.dumps(item, ensure_ascii=False) + "\n"
+    with (_d(job_id) / "evidence.jsonl").open("a", encoding="utf-8") as f:
+        f.write(line)
+
+
+def read_evidence(job_id: str, start: int = 0):
+    """Evidence records from line `start` on. A trailing line without its newline
+    (mid-write) is left for the next poll. Returns a list; the caller advances
+    its own offset by however many it consumes."""
+    p = _d(job_id) / "evidence.jsonl"
+    if not p.exists():
+        return []
+    items = []
+    with p.open("r", encoding="utf-8") as f:
+        for idx, line in enumerate(f):
+            if idx < start or not line.endswith("\n"):
+                continue
+            try:
+                items.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return items
+
+
 def retained(job_id: str) -> dict:
     """What we currently hold for this job — powers the transparency panel."""
     d = _d(job_id)
@@ -82,6 +110,8 @@ def delete_raw(job_id: str):
     shutil.rmtree(_d(job_id) / "work", ignore_errors=True)
     path(job_id, "transcript.txt").unlink(missing_ok=True)
     path(job_id, "messages.json").unlink(missing_ok=True)
+    path(job_id, "evidence.jsonl").unlink(missing_ok=True)   # carries decoded transcripts
+    path(job_id, "manifest.json").unlink(missing_ok=True)
 
 
 def delete(job_id: str):
@@ -135,10 +165,13 @@ def purge_expired() -> int:
                 continue
             exp = s.get("expires_at")
             born = s.get("created_at") or s.get("ts") or now
+            alive = (now - (s.get("ts") or 0)) < 600    # status updated in the last 10 min
             if exp is not None:                         # finished read with a TTL
                 if now >= exp:
                     delete(jid); deleted += 1
-            elif (now - born) > settings.max_job_age_seconds:   # never finished → garbage
+            elif (now - born) > settings.max_job_age_seconds and not alive:
+                # never finished → garbage — but NEVER sweep a job that is still
+                # heartbeating (a deep-mode decode on CPU can outlive the age cap)
                 delete(jid); deleted += 1
         except Exception:
             continue                                    # never let one bad job stop the sweep

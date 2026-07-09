@@ -87,24 +87,16 @@ class DecodeProfile:
     whisper: str             # pass-1 ASR model
     escalate: str            # tiered-ASR escalation model ("" disables)
     escalate_max_s: int      # cap on total re-run audio seconds
-    # Bridge for the pre-pipeline read loop (dies with server._read in the
-    # rebuild's step 3 — modes take over the inspect envelope):
-    iterative: bool          # text-first; images decoded on the read's request
-    inspect_rounds: int
-    inspect_images: int
-    select_k: int
 
 
 PROFILES = {
     # A machine with a real GPU (or Apple Silicon host Ollama): big models, big images.
     "gpu": DecodeProfile("qwen2.5vl:7b", "qwen2.5vl:3b", 768, 1280, 8, 90, "30m",
-                         "base", "large-v3-turbo", 1800,
-                         iterative=False, inspect_rounds=3, inspect_images=24, select_k=12),
+                         "base", "large-v3-turbo", 1800),
     # A CPU VPS (the hosted exhibit): the 3B for both passes, small images, few
     # workers, generous timeouts, warm all day. Matches the tuning validated live.
     "cpu": DecodeProfile("qwen2.5vl:3b", "qwen2.5vl:3b", 384, 512, 2, 180, "24h",
-                         "base", "large-v3-turbo", 900,
-                         iterative=True, inspect_rounds=2, inspect_images=8, select_k=6),
+                         "base", "large-v3-turbo", 900),
 }
 
 _PROFILE_NAME = os.environ.get("DECODE_PROFILE", "gpu").lower()
@@ -204,14 +196,9 @@ class Settings:
     explicit_marker: str = "intimate/explicit image"
     nsfw_threshold: float = 0.5
 
-    # --- pre-pipeline bridge (see DecodeProfile note; dies in rebuild step 3) ---
+    # One-window transcripts stay in the full human-readable form; map-reduce
+    # eras always assemble compact. (Constant — was the COMPACT_TRANSCRIPT knob.)
     compact_transcript: bool = False
-    iterative_discovery: bool = _PROFILE.iterative
-    max_inspect_rounds: int = _PROFILE.inspect_rounds
-    max_inspect_images: int = _PROFILE.inspect_images
-    deep_select_k: int = _PROFILE.select_k
-    images_per_era: int = 6
-    max_inspect_images_total: int = 64
 
     # --- deployment tier ---
     hosted: bool = _b("HOSTED")         # hosted "exhibit": consent + rate moat + TTL
