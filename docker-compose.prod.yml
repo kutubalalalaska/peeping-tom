@@ -5,16 +5,15 @@
 #                                      +-- read = GLM-5.2 via OpenRouter (ROUTE_A_*, ZDR)
 #
 # Privacy/safety posture baked in here (all map to real code — no theatre):
-#   - HOSTED=1            consent gate + server-side decode narration
+#   - HOSTED=1            consent gate + rate moat + fail-closed NSFW gate
 #   - EPHEMERAL=0         keep artifacts so the read + receipts work UNTIL...
 #   - self-destruct       ...the read auto-deletes READ_TTL_SECONDS after it's ready
 #                         (countdown on the result page); abandoned jobs swept too
-#   - rate moat           per-cookie + per-IP caps (no login, no PII)
 #   - COOKIE_SECURE=1     the session cookie is Secure (we're behind Caddy TLS)
 #
-# CPU decode is the only heavy part (the read is an API call). It's tuned DOWN for
-# CPU: the 3B vision model for BOTH passes, iterative discovery (decode only the
-# images the read asks for), small images, capped image count. Needs ~8GB RAM.
+# All decode tuning lives in DECODE_PROFILE=cpu (mirror/config.py): the 3B vision
+# model for both passes, small images, 2 workers, generous timeouts, VLM warm all
+# day, tiered-ASR caps sized for CPU. Needs ~8GB RAM.
 #
 # One-time:
 #   cp .env.example .env      # set ROUTE_A_API_KEY, DOMAIN, ACME_EMAIL
@@ -42,24 +41,13 @@ services:
         condition: service_healthy
     env_file: .env          # ROUTE_A_* (the read) — never committed
     environment:
-      # --- read + decode wiring ---
-      OLLAMA_HOST: http://ollama:11434
-      VISION_BACKEND: ollama
-      VISION_MODEL: qwen2.5vl:3b          # deep pass on CPU — 3B, NOT 7B
-      VISION_MODEL_FAST: qwen2.5vl:3b     # cheap-all pass (same model = one pull)
-      OLLAMA_KEEP_ALIVE: 24h              # keep the VLM warm all day (+ boot warm-up) so images don't cold-load
-      READ_STREAM_REASONING: "1"           # stream GLM-5.2's real chain-of-thought to the live "thinking" view (probe-confirmed 2026-07-08)
-      # --- CPU decode tuning (keep it usable on CPU) ---
-      ITERATIVE_DISCOVERY: "1"            # text/audio first; only decode images the read requests
-      DECODE_MAX_PX_FAST: "384"           # lowered from 512 — fewer image tokens = faster on CPU
-      DECODE_MAX_PX: "512"                # lowered from 768 — deep pass; the main per-image speed lever on CPU
-      DECODE_WORKERS: "2"
-      VISION_TIMEOUT: "180"               # CPU is slow per image
-      MAX_INSPECT_ROUNDS: "2"
-      MAX_INSPECT_IMAGES: "8"
-      DEEP_SELECT_K: "6"
-      WHISPER_MODEL: base
-      WHISPER_ESCALATE_MAX_SECONDS: "900" # tiered ASR: cap the large-v3-turbo re-run (CPU is ~realtime)
+      DECODE_PROFILE: cpu                 # ALL decode tuning (models/px/workers/ASR caps)
+      # Neutralize tuning leftovers a VPS .env may carry from the old .env.example —
+      # empty means "the profile decides" (config.py falls through on "").
+      VISION_MODEL: ""
+      WHISPER_MODEL: ""
+      DECODE_WORKERS: ""
+      READ_STREAM_REASONING: "1"          # stream GLM-5.2's real chain-of-thought (probe-confirmed 2026-07-08)
       # --- hosted tier: consent + self-destruct + abuse moat ---
       HOSTED: "1"
       EPHEMERAL: "0"
@@ -70,7 +58,6 @@ services:
       RATE_MAX_PER_SESSION: "5"
       RATE_MAX_PER_IP: "20"
       RATE_WINDOW_SECONDS: "86400"
-      DATA_DIR: /data
     volumes:
       - mirror-data:/data
       # Whisper models download from HF on first use (base ~150MB, the tiered-ASR

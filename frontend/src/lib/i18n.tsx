@@ -85,7 +85,7 @@ const en = {
   "insp.errorHero": "something broke",
   "insp.configStep": "config",
   "insp.configHero": "no read route",
-  "insp.configHint": "set a read route (or FRONTIER_PROVIDER=mock) and retry.",
+  "insp.configHint": "set a read route (or ROUTE_A_PROVIDER=mock) and retry.",
   "insp.readingFallback": "the model is reading the transcript…",
   "insp.openingPhotos": "opening important photos",
   "insp.readingChat": "reading your chat",
@@ -210,7 +210,6 @@ const en = {
   "drawer.deleted": "this chat is no longer available — it was deleted.",
   "drawer.earlier": "↑ earlier messages",
   "drawer.later": "↓ later messages",
-  "drawer.notFound": "message not found",
 };
 
 export type MsgKey = keyof typeof en;
@@ -282,7 +281,7 @@ const ru: Dict = {
   "insp.configStep": "конфигурация",
   "insp.configHero": "нет маршрута для разбора",
   "insp.configHint":
-    "задайте маршрут разбора (или FRONTIER_PROVIDER=mock) и повторите.",
+    "задайте маршрут разбора (или ROUTE_A_PROVIDER=mock) и повторите.",
   "insp.readingFallback": "модель читает транскрипт…",
   "insp.openingPhotos": "открываю важные фото",
   "insp.readingChat": "читаю ваш чат",
@@ -407,7 +406,6 @@ const ru: Dict = {
   "drawer.deleted": "этот чат больше недоступен — он был удалён.",
   "drawer.earlier": "↑ более ранние сообщения",
   "drawer.later": "↓ более поздние сообщения",
-  "drawer.notFound": "сообщение не найдено",
 };
 
 const it: Dict = {
@@ -475,7 +473,7 @@ const it: Dict = {
   "insp.configStep": "config",
   "insp.configHero": "nessuna rotta di lettura",
   "insp.configHint":
-    "imposta una rotta di lettura (o FRONTIER_PROVIDER=mock) e riprova.",
+    "imposta una rotta di lettura (o ROUTE_A_PROVIDER=mock) e riprova.",
   "insp.readingFallback": "il modello sta leggendo la trascrizione…",
   "insp.openingPhotos": "apro le foto importanti",
   "insp.readingChat": "sto leggendo la tua chat",
@@ -600,7 +598,6 @@ const it: Dict = {
   "drawer.deleted": "questa chat non è più disponibile — è stata eliminata.",
   "drawer.earlier": "↑ messaggi precedenti",
   "drawer.later": "↓ messaggi successivi",
-  "drawer.notFound": "messaggio non trovato",
 };
 
 const DICT: Record<Lang, Dict> = { en, ru, it };

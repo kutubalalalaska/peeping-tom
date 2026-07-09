@@ -1,3 +1,10 @@
+# Self-host (Tier 1): containerized Ollama + the app. `docker compose up --build`.
+#
+# Dev presets ride the SAME file via APP_ENV_FILE (loaded on top of .env):
+#   APP_ENV_FILE=.env.mock       docker compose up app --build   # all mocked, no models
+#   APP_ENV_FILE=.env.hostdecode docker compose up app --build   # native host Ollama + mock read
+#   APP_ENV_FILE=.env.fulltest   docker compose up app --build   # native Ollama + your real ROUTE_A_*
+# Hot reload: layer docker-compose.dev.yml on top (see that file).
 services:
   ollama:
     image: ollama/ollama:latest
@@ -13,13 +20,13 @@ services:
 
   app:
     build: .
-    depends_on:
-      ollama:
-        condition: service_started
-    env_file: .env
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-      DATA_DIR: /data
+    # No depends_on: the entrypoint waits for Ollama itself (and skips the wait
+    # entirely on mock presets), so `docker compose up app` works standalone.
+    env_file:
+      - path: .env
+        required: false
+      - path: ${APP_ENV_FILE:-.env}          # preset overrides land on top of .env
+        required: false
     volumes:
       - mirror-data:/data                     # jobs, transcripts, reads
     ports:

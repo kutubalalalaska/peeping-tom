@@ -1,7 +1,7 @@
 # DEV OVERRIDE — hot reload, no image rebuilds while iterating.
 #
-# Layer this on top of any stack, e.g. the fulltest one:
-#   docker compose -f docker-compose.fulltest.yml -f docker-compose.dev.yml up
+# Layer this on top of the base stack (+ any env preset), e.g.:
+#   APP_ENV_FILE=.env.fulltest docker compose -f docker-compose.yml -f docker-compose.dev.yml up app
 #
 # What it does:
 #   - bind-mounts ./mirror over the baked-in copy, so backend edits land in the

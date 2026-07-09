@@ -19,17 +19,6 @@ export const getConfig = async () => asJson<AppConfig>(await fetch("/api/config"
 // Reads left for this cookie-session (Landing readout, hosted tier).
 export const getQuota = async () => asJson<Quota>(await fetch("/api/quota"));
 
-// `lang` (the chosen UI language) rides along so the read comes back in it.
-export async function uploadChat(file: File, source: string, lang?: string) {
-  const fd = new FormData();
-  fd.append("file", file);
-  fd.append("source", source);
-  if (lang) fd.append("lang", lang);
-  return asJson<{ job_id: string }>(
-    await fetch("/api/upload", { method: "POST", body: fd })
-  );
-}
-
 // ---- resumable chunked upload (mirror/uploads.py) ----
 // init -> part(offset) … -> complete. Survives a dropped connection (resume from
 // the server's byte offset) and never holds the whole file in memory.
@@ -108,24 +97,6 @@ export async function uploadChatChunked(
 
 export const getStatus = async (id: string) =>
   asJson<JobStatus>(await fetch(`/api/jobs/${id}`));
-
-export async function setRole(id: string, me: string) {
-  const fd = new FormData();
-  fd.append("me", me);
-  return asJson<{ ok: boolean; me: string }>(
-    await fetch(`/api/jobs/${id}/role`, { method: "POST", body: fd })
-  );
-}
-
-// Cross the boundary. `route` (a read-route id) is optional — omitted, the
-// backend uses the default route. See READ_ROUTES.md.
-export async function sendRead(id: string, route?: string) {
-  const fd = new FormData();
-  if (route) fd.append("route", route);
-  return asJson<{ ok: boolean; route?: string }>(
-    await fetch(`/api/jobs/${id}/send`, { method: "POST", body: fd })
-  );
-}
 
 export const getResult = async (id: string) =>
   asJson<ReadResult>(await fetch(`/api/jobs/${id}/result`));

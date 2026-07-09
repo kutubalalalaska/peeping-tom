@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .config import settings
+from .mediatypes import is_video_note, kind as file_type
 
 # Register HEIC/HEIF support for Pillow if available (common in iPhone exports).
 # Wheels bundle libheif, so this needs no system packages; absent it, .heic falls
@@ -65,17 +66,6 @@ DEEP_GUARDED = (
 STICKER = "WhatsApp sticker. One short line: what it depicts and the emotion it conveys (stickers stand in for words)."
 FRAME = "Frame from a short video in a chat. One line: what it shows."
 RICH = {"people", "scene"}
-
-
-def file_type(p: Path) -> str:
-    n, e = p.name.upper(), p.suffix.lower()
-    if "AUDIO" in n or e in (".opus", ".m4a", ".mp3", ".wav", ".ogg"): return "audio"
-    if "VIDEO" in n or "GIF" in n or e in (".mp4", ".mov", ".3gp", ".webm", ".gif"): return "video"
-    # .tgs = Telegram's gzipped-Lottie animated sticker (no raster the VLM can read);
-    # it's captioned from the message emoji upstream and skipped here.
-    if e in (".webp", ".tgs") or "STICKER" in n: return "sticker"
-    if "PHOTO" in n or "IMAGE" in n or e in (".jpg", ".jpeg", ".png", ".heic", ".heif"): return "image"
-    return "document"
 
 
 def _vlm(img: Path, prompt: str, num_predict: int = None, model: str = None):
@@ -385,12 +375,6 @@ def _suspect_transcript(text: str, q, language: str):
     return None
 
 
-def _is_video_note(f: Path) -> bool:
-    """A round video MESSAGE (Telegram stores these under round_video_messages/), as
-    opposed to a shared video clip — always worth transcribing, regardless of size."""
-    return "round_video" in str(f).lower() or "video_message" in str(f).lower()
-
-
 def decode_media(files, work: Path, on_progress=None, language: str = None, on_reinspect=None) -> dict:
     """CHEAP-ALL pass. files: list[Path]. Returns {filename: record}. After each
     decoded item calls on_progress(done, total, item={file,type,caption|None}).
@@ -468,7 +452,7 @@ def decode_media(files, work: Path, on_progress=None, language: str = None, on_r
                 rec["transcript"] = f"[mock video speech {f.stem[-6:]}]"
         else:
             if settings.transcribe_video and wm is not None:
-                if _is_video_note(f) or f.stat().st_size <= settings.video_max_mb * 1_000_000:
+                if is_video_note(f) or f.stat().st_size <= settings.video_max_mb * 1_000_000:
                     try:
                         tx, q = _transcribe(f, work, wm, language)
                         if tx:

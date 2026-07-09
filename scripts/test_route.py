@@ -11,9 +11,7 @@ Usage (from mirror-app/, with the route's env loaded from .env):
 
     cd mirror-app
     set -a && source .env && set +a
-    python3 scripts/test_route.py              # default: managed-api (Track A)
-    python3 scripts/test_route.py self-host     # Track B
-    python3 scripts/test_route.py <route-id>
+    python3 scripts/test_route.py
 """
 
 import sys
@@ -39,29 +37,24 @@ TRANSCRIPT = "\n".join([
 
 
 def main() -> int:
-    want = sys.argv[1] if len(sys.argv) > 1 else "managed-api"
-    route = settings.route(want) or settings.route()
+    route = settings.route(sys.argv[1] if len(sys.argv) > 1 else None) or settings.route()
     if route is None:
-        print(f"✗ No route '{want}' configured (and no default). Set its ROUTE_*/"
-              f"FRONTIER_* in .env, then `set -a && source .env && set +a`.",
-              file=sys.stderr)
+        print("✗ No route configured. Set ROUTE_A_BASE_URL/ROUTE_A_MODEL/ROUTE_A_API_KEY "
+              "in .env, then `set -a && source .env && set +a`.", file=sys.stderr)
         return 2
-    print(f"Route   : {route.id}  (kind={route.kind})")
+    print(f"Route   : {route.id}")
     print(f"Model   : {route.model}")
     print(f"Base URL: {route.base_url}")
-    print(f"ZDR     : {route.zdr}   third_party={route.third_party}   "
-          f"cold_start={route.expect_cold_start}")
+    print(f"ZDR     : {route.zdr}")
     if not route.ready():
         print("✗ Route is not ready (missing base_url or model).", file=sys.stderr)
         return 2
     if route.provider == "mock":
-        print("✗ This is the mock route — set the real ROUTE_*/FRONTIER_* to test.",
+        print("✗ This is the mock route — set the real ROUTE_A_* to test.",
               file=sys.stderr)
         return 2
 
-    print("\nCalling the endpoint now (real call — billed ~cents / GPU-seconds)…")
-    if route.expect_cold_start:
-        print("(self-host route — first call may cold-start; timing includes that)")
+    print("\nCalling the endpoint now (real call — billed ~cents)…")
     t0 = time.monotonic()
     try:
         out = frontier.read(TRANSCRIPT, "Me", route)

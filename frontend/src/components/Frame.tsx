@@ -12,7 +12,6 @@ export default function Frame({
   custody,
   nav,
   top,
-  run,
 }: {
   step: string;
   hero: string;
@@ -20,7 +19,6 @@ export default function Frame({
   custody?: string;
   nav?: ReactNode;
   top?: boolean;
-  run?: string;
 }) {
   const typed = useTypeIn(hero);
   return (
@@ -28,7 +26,6 @@ export default function Frame({
       <div className="meta">
         <span>drop 001: peeping tom</span>
         <span className="meta-right">
-          {run ? <span>{run}</span> : null}
           <LangSwitcher />
         </span>
       </div>

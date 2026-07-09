@@ -138,7 +138,6 @@ button { font: inherit; cursor: pointer; }
 .th-cur { display: inline-block; width: .5em; height: 1em; background: var(--secondary); transform: translateY(2px); margin-left: 2px; animation: blink 1.1s steps(1) infinite; }
 .stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 140px; }
 .glimpse { text-align: center; transition: opacity .22s ease, transform .22s ease; }
-.glimpse.out { opacity: 0; transform: translateY(-7px); }
 .glimpse .thumb { font-size: 11px; line-height: 1.08; margin: 0 0 10px; }
 .glimpse .tag { font-size: 12px; }
 .glimpse .player { font-size: 12px; margin-top: 8px; letter-spacing: 1px; }
@@ -152,11 +151,7 @@ button { font: inherit; cursor: pointer; }
   font-size: clamp(14px, 1.5vw, 17px); font-weight: 500;
   border-top: 1px solid var(--hairline); padding-top: 16px; margin-top: 8px;
 }
-.barrow.done { color: var(--success); }
 .phase { font-size: 12.5px; font-weight: 400; white-space: nowrap; color: var(--secondary); }
-.done2 { text-align: center; }
-.done2 .big { font-size: 18px; font-weight: 500; }
-.done2 .sub { font-size: 13px; color: var(--secondary); margin-top: 10px; line-height: 1.9; }
 
 /* ---- the read ---- */
 .read p { font-size: 16px; line-height: 1.85; margin: 22px 0 0; }
@@ -197,8 +192,6 @@ button { font: inherit; cursor: pointer; }
   font-size: clamp(15px, 1.9vw, 18px); line-height: 1.5; font-weight: 500; margin-top: 30px;
   border-top: 1px solid var(--ink); padding-top: 22px;
 }
-.closing { font-size: 13px; color: var(--muted); margin-top: 26px; line-height: 1.8;
-  border-top: 1px solid var(--hairline); padding-top: 18px; }
 .prov { font-size: 11.5px; color: var(--muted); letter-spacing: .04em; margin-top: 16px; }
 
 .nuke {
@@ -299,7 +292,7 @@ button { font: inherit; cursor: pointer; }
   .foot { font-size: 11px; }
 }
 
-/* ---- citation chips (long runs / unresolved refs) ---- */
+/* ---- citation chips (long citation runs) ---- */
 .cite {
   display: inline-block; font: inherit; font-size: 12px; line-height: 1.4;
   background: none; border: 1px solid var(--placeholder); border-radius: 10px;

@@ -1,17 +1,20 @@
-"""Runtime configuration, all from environment variables (see .env.example).
+"""Runtime configuration.
 
-The read can run through one of several **routes** (read backends). The hosted
-"exhibit" tier exposes more than one and lets the *user* pick:
+The environment is deliberately SMALL (see .env.example): keys and hosts, the
+deployment tier, and the safety rails. Everything that used to be an env tuning
+knob lives in code:
 
-  - Track A — "managed_api": a managed open-weight inference API (e.g. OpenRouter
-    with zero-data-retention) serving a true frontier-open model. Maximum insight;
-    the assembled TEXT transcript transits a third party (mitigated by ZDR).
-  - Track B — "self_host": our own VPS running an open model behind an
-    OpenAI-compatible server (vLLM/SGLang). Privacy-pure — nothing leaves our
-    controlled stack — at the cost of a smaller model and a possible cold start.
+  - DecodeProfile (DECODE_PROFILE=gpu|cpu) — local decode tuning per hardware
+    class: which VLM/Whisper models, image sizes, worker counts, timeouts.
+  - Mode ("fast" | "deep") — the read pipeline's envelopes (request budgets,
+    fold-in cadence). Consumed by the pipeline orchestrator.
 
-A single legacy `FRONTIER_*` block still works and becomes one route, so the
-self-host tier and the mock compose keep running unchanged.
+The read runs through ONE remote route (ROUTE_A_* — the names are kept from the
+multi-route era so existing .env files stay valid). ROUTE_A_PROVIDER=mock runs
+the whole flow with no endpoint and no models (flow tests).
+
+Legacy env names from the pre-rebuild config are detected and logged as ignored
+at import, so a stale .env fails loudly into the logs instead of silently.
 """
 
 import os
@@ -22,248 +25,240 @@ def _b(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).lower() in ("1", "true", "yes", "on")
 
 
+# --- the read route -----------------------------------------------------------
+
 @dataclass(frozen=True)
 class Route:
-    """One read backend the user can be routed to."""
+    """The read backend. Only the assembled TEXT transcript ever reaches it."""
     id: str
-    kind: str               # managed_api | self_host | mock
     provider: str           # openai (OpenAI-compatible) | anthropic | mock
     base_url: str
     api_key: str
     model: str
-    label: str = ""         # fallback label; UI copy (narrative thread) may override
-    zdr: bool = False        # send a zero-data-retention hint in the payload (OpenRouter)
-    third_party: bool = True   # does the assembled TEXT reach a third party?
-    expect_cold_start: bool = False   # first read may wait for a cold GPU to spin up
+    zdr: bool = False       # ask OpenRouter for zero-data-retention endpoints only
 
     def ready(self) -> bool:
-        if self.provider == "mock":
-            return True
-        return bool(self.base_url and self.model)
+        return self.provider == "mock" or bool(self.base_url and self.model)
 
     def public(self) -> dict:
-        """The view the frontend/`/api/config` may show — no secrets."""
+        """The view /api/config may show — no secrets."""
         return {
             "id": self.id,
-            "kind": self.kind,
+            "kind": "mock" if self.provider == "mock" else "managed_api",
             "model": self.model,
-            "label": self.label,
-            "third_party": self.third_party,     # text crosses to a third party?
-            "zero_retention": self.zdr,           # provider asked not to retain it
-            "expect_cold_start": self.expect_cold_start,
+            "label": "Demo read" if self.provider == "mock" else "Maximum insight",
+            "third_party": self.provider != "mock",
+            "zero_retention": self.zdr,
+            "expect_cold_start": False,
             "ready": self.ready(),
         }
 
 
-def _route_from_env(prefix, default_id, default_kind, default_label,
-                    default_third_party, default_cold):
-    """Build a Route from a `<PREFIX>_*` env group, or None if unconfigured."""
-    provider = os.environ.get(f"{prefix}_PROVIDER", "openai")
-    base = os.environ.get(f"{prefix}_BASE_URL", "")
-    model = os.environ.get(f"{prefix}_MODEL", "")
-    if provider != "mock" and not (base and model):
-        return None
-    return Route(
-        id=os.environ.get(f"{prefix}_ID", default_id),
-        kind=os.environ.get(f"{prefix}_KIND", default_kind),
-        provider=provider,
-        base_url=base,
-        api_key=os.environ.get(f"{prefix}_API_KEY", ""),
-        model=model,
-        label=os.environ.get(f"{prefix}_LABEL", default_label),
-        zdr=_b(f"{prefix}_ZDR"),
-        third_party=_b(f"{prefix}_THIRD_PARTY", "1" if default_third_party else "0"),
-        expect_cold_start=_b(f"{prefix}_COLD_START", "1" if default_cold else "0"),
-    )
-
-
-def _build_routes() -> tuple:
-    routes = []
-    # Track A — managed API (OpenRouter / DeepInfra / …): frontier-open, third-party.
-    a = _route_from_env("ROUTE_A", "managed-api", "managed_api",
-                         "Maximum insight", default_third_party=True, default_cold=False)
-    if a:
-        routes.append(a)
-    # Track B — self-host on our VPS: privacy-pure, may cold-start.
-    b = _route_from_env("ROUTE_B", "self-host", "self_host",
-                        "Maximum privacy", default_third_party=False, default_cold=True)
-    if b:
-        routes.append(b)
-    if routes:
-        return tuple(routes)
-
-    # --- legacy single-route fallback (FRONTIER_*) — self-host & mock tiers ---
-    provider = os.environ.get("FRONTIER_PROVIDER", "openai")
+def _build_route():
+    provider = os.environ.get("ROUTE_A_PROVIDER", "openai")
     if provider == "mock":
-        return (Route(id="mock", kind="mock", provider="mock", base_url="", api_key="",
-                      model="", label="Demo read", third_party=False),)
-    base = os.environ.get("FRONTIER_BASE_URL", "")
-    model = os.environ.get("FRONTIER_MODEL", "")
-    if base and model:
-        return (Route(id="default", kind=os.environ.get("FRONTIER_KIND", "self_host"),
-                      provider=provider, base_url=base,
-                      api_key=os.environ.get("FRONTIER_API_KEY", ""), model=model,
-                      label="The read", third_party=_b("FRONTIER_THIRD_PARTY")),)
-    return ()
+        return Route(id="mock", provider="mock", base_url="", api_key="", model="")
+    base = os.environ.get("ROUTE_A_BASE_URL", "")
+    model = os.environ.get("ROUTE_A_MODEL", "")
+    if not (base and model):
+        return None
+    return Route(id="managed-api", provider=provider, base_url=base,
+                 api_key=os.environ.get("ROUTE_A_API_KEY", ""), model=model,
+                 zdr=_b("ROUTE_A_ZDR"))
 
 
-_ROUTES = _build_routes()
+_ROUTE = _build_route()
+
+
+# --- decode profiles (DECODE_PROFILE) ------------------------------------------
+
+@dataclass(frozen=True)
+class DecodeProfile:
+    """Local-decode tuning for one hardware class. Chosen once per deployment;
+    VISION_MODEL / WHISPER_MODEL / DECODE_WORKERS env vars override single fields
+    when a box really needs it."""
+    vision_model: str        # deep-pass VLM
+    vision_model_fast: str   # cheap-all pass VLM
+    px_fast: int             # longest image side, cheap pass
+    px_deep: int             # longest image side, deep pass
+    workers: int             # VLM thread pool
+    vlm_timeout: int         # per-call timeout (s)
+    keep_alive: str          # how long Ollama keeps the VLM warm
+    whisper: str             # pass-1 ASR model
+    escalate: str            # tiered-ASR escalation model ("" disables)
+    escalate_max_s: int      # cap on total re-run audio seconds
+    # Bridge for the pre-pipeline read loop (dies with server._read in the
+    # rebuild's step 3 — modes take over the inspect envelope):
+    iterative: bool          # text-first; images decoded on the read's request
+    inspect_rounds: int
+    inspect_images: int
+    select_k: int
+
+
+PROFILES = {
+    # A machine with a real GPU (or Apple Silicon host Ollama): big models, big images.
+    "gpu": DecodeProfile("qwen2.5vl:7b", "qwen2.5vl:3b", 768, 1280, 8, 90, "30m",
+                         "base", "large-v3-turbo", 1800,
+                         iterative=False, inspect_rounds=3, inspect_images=24, select_k=12),
+    # A CPU VPS (the hosted exhibit): the 3B for both passes, small images, few
+    # workers, generous timeouts, warm all day. Matches the tuning validated live.
+    "cpu": DecodeProfile("qwen2.5vl:3b", "qwen2.5vl:3b", 384, 512, 2, 180, "24h",
+                         "base", "large-v3-turbo", 900,
+                         iterative=True, inspect_rounds=2, inspect_images=8, select_k=6),
+}
+
+_PROFILE_NAME = os.environ.get("DECODE_PROFILE", "gpu").lower()
+if _PROFILE_NAME not in PROFILES:
+    print(f"[config] unknown DECODE_PROFILE={_PROFILE_NAME!r} — using 'gpu'", flush=True)
+    _PROFILE_NAME = "gpu"
+_PROFILE = PROFILES[_PROFILE_NAME]
+
+
+# --- read modes (the pipeline's envelopes) --------------------------------------
+
+@dataclass(frozen=True)
+class Mode:
+    """Per-mode envelope for the read pipeline. The model REASONS about which
+    media to decode; these are the outer bounds it works within, not micro-caps."""
+    request_rounds: int = 1          # media-request rounds after the first read (fast)
+    max_request_items: int = 24      # total media items the read may have decoded
+    max_request_audio_s: int = 600   # total requested audio seconds
+    decode_wall_s: int = 480         # wall-clock budget for fulfilling one request round
+    era_request_items: int = 6       # per-era request cap (map-reduce)
+    era_request_audio_s: int = 240
+    fold_min_items: int = 40         # deep: fold a round once this much new evidence
+    fold_min_interval_s: int = 90    # deep: or this much time + fold_trickle_items
+    fold_trickle_items: int = 8
+    fold_max_per_round: int = 150    # deep: split bigger deltas across rounds
+    era_reread_threshold: int = 10   # deep tier-3: re-read an era that gained this many
+
+
+MODES = {
+    "fast": Mode(),                  # text-first; decode only what the read asks for
+    "deep": Mode(request_rounds=0),  # full decode in parallel; evidence folds in
+}
+
+
+# --- stale-env detection ---------------------------------------------------------
+
+_LEGACY_ENV = (
+    "FRONTIER_PROVIDER", "FRONTIER_BASE_URL", "FRONTIER_API_KEY", "FRONTIER_MODEL",
+    "FRONTIER_KIND", "FRONTIER_THIRD_PARTY", "READ_DEFAULT_ROUTE",
+    "ROUTE_B_PROVIDER", "ROUTE_B_BASE_URL", "ROUTE_B_API_KEY", "ROUTE_B_MODEL",
+    "ROUTE_A_LABEL", "ROUTE_A_ID", "ROUTE_A_KIND", "ROUTE_A_THIRD_PARTY", "ROUTE_A_COLD_START",
+    "ITERATIVE_DISCOVERY", "MAX_INSPECT_ROUNDS", "MAX_INSPECT_IMAGES",
+    "MAX_INSPECT_IMAGES_TOTAL", "IMAGES_PER_ERA", "DEEP_SELECT_K",
+    "COMPACT_TRANSCRIPT", "CHUNK_FILL", "READ_SAFETY", "READ_RESERVE_TOKENS",
+    "VISION_MODEL_FAST", "DECODE_MAX_PX", "DECODE_MAX_PX_FAST",
+    "VISION_NUM_PREDICT", "VISION_TIMEOUT", "OLLAMA_KEEP_ALIVE",
+    "WHISPER_LANGUAGE", "WHISPER_BEAM", "WHISPER_ESCALATE_MODEL",
+    "WHISPER_ESCALATE_MAX_SECONDS", "WHISPER_ESCALATE_LOGPROB",
+    "TRANSCRIBE_VIDEO", "VIDEO_MAX_MB", "MARK_EXPLICIT", "EXPLICIT_MARKER",
+    "NSFW_THRESHOLD", "NSFW_REQUIRED", "SESSION_COOKIE",
+)
+for _name in sorted(set(_LEGACY_ENV) & set(os.environ)):
+    print(f"[config] ignored legacy env {_name} — this knob now lives in code "
+          f"(DecodeProfile/Mode presets; see mirror/config.py)", flush=True)
 
 
 @dataclass(frozen=True)
 class Settings:
-    # --- the read: one or more selectable routes (see _build_routes / .env.example) ---
-    routes: tuple = _ROUTES
-    # Ask managed APIs to stream reasoning tokens (OpenRouter `reasoning`) so the
-    # analysis screen can show the model's real chain-of-thought. Off by default
-    # until confirmed on the live endpoint (scripts/probe_reasoning.py); the NOTE
-    # working-line preamble is the always-on fallback "thinking" source.
+    # --- the read ---
+    routes: tuple = (_ROUTE,) if _ROUTE else ()
+    # Stream the model's real reasoning tokens to the live "thinking" view
+    # (OpenRouter `reasoning`; probe-confirmed for GLM-5.2 on the live endpoint).
     stream_reasoning: bool = _b("READ_STREAM_REASONING")
+    # The context window the size gate plans against. 262k (not the model's full
+    # window): on OpenRouter it routes GLM onto the reliable fp8 providers instead
+    # of the flaky >=600k-context fp4 ones — validated on the 4.7GB test chat.
+    read_context_tokens: int = int(os.environ.get("READ_CONTEXT_TOKENS", "262144"))
+    read_reserve_tokens: int = 8000     # held back for system prompt + wrapper + output
+    read_safety: float = 0.9            # margin on the (approximate) token estimate
+    chunk_fill: float = 0.6             # fraction of usable window per map-reduce era
 
     # --- local media decode ---
     vision_backend: str = os.environ.get("VISION_BACKEND", "ollama")   # ollama | mock
     ollama_host: str = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
-    vision_model: str = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
-    whisper_model: str = os.environ.get("WHISPER_MODEL", "base")
-    # Whisper quality levers. language: "" = auto-detect from the chat's TEXT once and apply to
-    # all clips (general, per-chat — fixes short-clip misdetect without assuming an audience);
-    # "auto" = Whisper's per-clip detection; or a code like "ru" to force. beam_size>1 = better
-    # accuracy (1 is greedy). (VAD + condition_on_previous_text=False are applied in code — they
-    # cut hallucination-on-silence and repetition loops, language-agnostic.)
-    whisper_language: str = os.environ.get("WHISPER_LANGUAGE", "")     # "" = detect-from-corpus
-    whisper_beam: int = int(os.environ.get("WHISPER_BEAM", "5"))
-    # Tiered ASR: everything transcribes on whisper_model (fast); clips whose pass-1 result
-    # scores as garbage (empty despite speech / wrong language / repetition loop / low decoder
-    # confidence) are re-run ONCE on the bigger escalate model, worst-first, under a cap on
-    # total re-run audio seconds (0 = uncapped). All local — costs time, never privacy.
-    # "" disables escalation; large-v3-turbo ≈ large-v3 quality at ~5x its speed.
-    whisper_escalate_model: str = os.environ.get("WHISPER_ESCALATE_MODEL", "large-v3-turbo")
-    whisper_escalate_max_s: int = int(os.environ.get("WHISPER_ESCALATE_MAX_SECONDS", "1800"))
-    whisper_escalate_logprob: float = float(os.environ.get("WHISPER_ESCALATE_LOGPROB", "-0.8"))
-    # Transcribe the AUDIO of video messages (round video notes) — many people use them as a
-    # primary channel, so their speech is high-signal. Round notes are always transcribed;
-    # larger shared clips only if under video_max_mb (avoid transcribing long movies). The
-    # visual frames are a separate, deep-pass concern; this is just the speech.
-    transcribe_video: bool = _b("TRANSCRIBE_VIDEO", "1")
-    video_max_mb: int = int(os.environ.get("VIDEO_MAX_MB", "25"))
-    decode_workers: int = int(os.environ.get("DECODE_WORKERS", "8"))
-    decode_max_px: int = int(os.environ.get("DECODE_MAX_PX", "1280"))          # cap longest side (deep pass)
-    vision_num_predict: int = int(os.environ.get("VISION_NUM_PREDICT", "128"))  # cap caption length (tokens)
-    ollama_keep_alive: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")        # keep the model warm across calls/jobs
-    vision_timeout: int = int(os.environ.get("VISION_TIMEOUT", "90"))          # per-VLM-call timeout (s) — bounds a hung image
-    # --- two-pass decode: cheap label-all on a small VLM, deep 7B only on frontier-picked images ---
-    vision_model_fast: str = os.environ.get("VISION_MODEL_FAST", "")          # small VLM for the cheap-all pass (e.g. qwen2.5vl:3b); blank = same as vision_model
-    decode_max_px_fast: int = int(os.environ.get("DECODE_MAX_PX_FAST", "768")) # smaller cap for the cheap-all pass
-    deep_select_k: int = int(os.environ.get("DEEP_SELECT_K", "12"))            # per-round image-pick cap (also the single-round cap)
-    # --- explicit content (adult/legal): detect LOCALLY, carry a neutral marker ---
-    # When an image is flagged explicit (nudity/sexual content), the transcript carries
-    # a neutral marker instead of a graphic caption — so nothing intimate crosses the
-    # privacy boundary. The raw image stays local (receipts unaffected). The *fact* of
-    # an intimate image at a charged moment is the behavioural signal the read needs (a
-    # non-verbal act), not the anatomy — so the read loses nothing it can use. Detection
-    # rides the existing blind VLM classification (a dedicated local NSFW classifier is
-    # the planned hardening). NOTE: this is the ADULT/LEGAL case only — CSAM is a
-    # separate, deferred concern and this flag does NOT attempt to detect it.
-    mark_explicit: bool = _b("MARK_EXPLICIT", "1")            # on by default
-    explicit_marker: str = os.environ.get("EXPLICIT_MARKER", "intimate/explicit image")
-    # The explicit gate is a DEDICATED local NSFW detector (NudeNet) that runs BEFORE
-    # captioning — the VLM's self-report can't be trusted (it captions nudes but answers
-    # EXPLICIT=no). nsfw_threshold: detector score to count as exposed (lower = stricter,
-    # biased for recall). nsfw_required: if the detector can't load, fail CLOSED (skip all
-    # captions) instead of degrading to the unreliable VLM flag — set on the hosted exhibit.
-    nsfw_threshold: float = float(os.environ.get("NSFW_THRESHOLD", "0.5"))
-    nsfw_required: bool = _b("NSFW_REQUIRED")
-    # --- scaling: lossless transcript compression (SCALING.md Stage 2) ---
-    # Day-grouped dates + short sender tokens (legend in-band) → ~30-40% fewer tokens,
-    # #ids preserved. Off by default (existing one-shot behaviour unchanged); turn on
-    # for large corpora / the big-chat path. The size gate (below) also auto-uses it.
-    compact_transcript: bool = _b("COMPACT_TRANSCRIPT")
+    decode_profile: str = _PROFILE_NAME
+    vision_model: str = os.environ.get("VISION_MODEL", "") or _PROFILE.vision_model
+    vision_model_fast: str = _PROFILE.vision_model_fast
+    decode_max_px: int = _PROFILE.px_deep
+    decode_max_px_fast: int = _PROFILE.px_fast
+    decode_workers: int = int(os.environ.get("DECODE_WORKERS", "0") or 0) or _PROFILE.workers
+    vision_timeout: int = _PROFILE.vlm_timeout
+    vision_num_predict: int = 128       # cap caption length (tokens)
+    ollama_keep_alive: str = _PROFILE.keep_alive
+    whisper_model: str = os.environ.get("WHISPER_MODEL", "") or _PROFILE.whisper
+    whisper_language: str = ""          # "" = detect once from the chat's text
+    whisper_beam: int = 5
+    whisper_escalate_model: str = _PROFILE.escalate
+    whisper_escalate_max_s: int = _PROFILE.escalate_max_s
+    whisper_escalate_logprob: float = -0.8
+    transcribe_video: bool = True       # round notes always; shared clips under video_max_mb
+    video_max_mb: int = 25
 
-    # --- scaling: the size gate (SCALING.md Stage 1) ---
-    # When the (language-aware) token estimate exceeds the usable window, the read is
-    # done as a chronological MAP-REDUCE instead of one-shot. read_context_tokens is the
-    # model's window; default 1M (GLM-5.2). Lower it to force/ test chunking. The reserve
-    # holds back room for the system prompt + wrapper + output.
-    read_context_tokens: int = int(os.environ.get("READ_CONTEXT_TOKENS", "1000000"))
-    read_reserve_tokens: int = int(os.environ.get("READ_RESERVE_TOKENS", "8000"))
-    read_safety: float = float(os.environ.get("READ_SAFETY", "0.9"))   # margin on usable (token est is approximate)
-    chunk_fill: float = float(os.environ.get("CHUNK_FILL", "0.6"))     # fraction of usable per map-reduce chunk
-    # Per-era image deepening (SCALING.md Stage 4): in map-reduce + iterative mode each era
-    # may INSPECT up to images_per_era of its own images (effort follows signal, distributed
-    # across eras instead of one flat global cap), bounded overall by max_inspect_images_total.
-    images_per_era: int = int(os.environ.get("IMAGES_PER_ERA", "6"))
-    max_inspect_images_total: int = int(os.environ.get("MAX_INSPECT_IMAGES_TOTAL", "64"))
+    # --- explicit content: detect LOCALLY (NudeNet, before captioning), carry a
+    # neutral marker — nothing intimate ever crosses the boundary. Fail-closed on
+    # the hosted tier (no knob: hosted implies required). ---
+    mark_explicit: bool = True
+    explicit_marker: str = "intimate/explicit image"
+    nsfw_threshold: float = 0.5
 
-    # --- iterative discovery: text+audio first, then the frontier requests images in capped rounds ---
-    iterative_discovery: bool = _b("ITERATIVE_DISCOVERY")                     # off = cheap-all up front (1 round); on = text-first, multi-round
-    max_inspect_rounds: int = int(os.environ.get("MAX_INSPECT_ROUNDS", "3"))  # cap on frontier image-request rounds
-    max_inspect_images: int = int(os.environ.get("MAX_INSPECT_IMAGES", "24")) # cap on total images deep-analyzed across all rounds
+    # --- pre-pipeline bridge (see DecodeProfile note; dies in rebuild step 3) ---
+    compact_transcript: bool = False
+    iterative_discovery: bool = _PROFILE.iterative
+    max_inspect_rounds: int = _PROFILE.inspect_rounds
+    max_inspect_images: int = _PROFILE.inspect_images
+    deep_select_k: int = _PROFILE.select_k
+    images_per_era: int = 6
+    max_inspect_images_total: int = 64
 
-    # --- hosted-tier behaviour ---
-    hosted: bool = _b("HOSTED")                # hosted "exhibit" tier — consent + server-side decode
-    ephemeral: bool = _b("EPHEMERAL")          # delete raw media + transcript after the read
+    # --- deployment tier ---
+    hosted: bool = _b("HOSTED")         # hosted "exhibit": consent + rate moat + TTL
+    ephemeral: bool = _b("EPHEMERAL")   # delete raw media + transcript after the read
 
-    # --- hosted-tier: self-destruct (TTL) ---
-    # The read self-destructs READ_TTL_SECONDS after it is READY (state=done) — the
-    # countdown the result page shows. Unfinished/abandoned jobs ("garbage") are swept
-    # separately: anything that never reached `done` is purged once older than
-    # MAX_JOB_AGE_SECONDS (kept well above worst-case CPU decode so a slow job is never
-    # killed mid-flight). The in-process sweeper runs every PURGE_INTERVAL_SECONDS;
-    # scripts/purge.py does the same for a real system cron.
-    read_ttl_seconds: int = int(os.environ.get("READ_TTL_SECONDS", "600"))          # 10 min after the read is ready
-    max_job_age_seconds: int = int(os.environ.get("MAX_JOB_AGE_SECONDS", "3600"))   # garbage sweep for never-finished jobs
+    # --- hosted tier: self-destruct + garbage sweep ---
+    read_ttl_seconds: int = int(os.environ.get("READ_TTL_SECONDS", "600"))
+    max_job_age_seconds: int = int(os.environ.get("MAX_JOB_AGE_SECONDS", "3600"))
     purge_interval_seconds: int = int(os.environ.get("PURGE_INTERVAL_SECONDS", "120"))
 
-    # --- hosted-tier: abuse moat (no login, no PII) ---
-    # Cap reads per ephemeral cookie-session and per client IP over a rolling window.
-    # The cookie cap deters casual re-runs (incognito/clearing cookies resets it); the
-    # IP cap + a CDN in front are the real teeth. Counted by scanning the job store, so
-    # there is nothing extra to persist and it stays inspectable.
-    rate_window_seconds: int = int(os.environ.get("RATE_WINDOW_SECONDS", "86400"))  # 24h
+    # --- hosted tier: abuse moat (no login, no PII) ---
+    rate_window_seconds: int = int(os.environ.get("RATE_WINDOW_SECONDS", "86400"))
     rate_max_per_session: int = int(os.environ.get("RATE_MAX_PER_SESSION", "5"))
     rate_max_per_ip: int = int(os.environ.get("RATE_MAX_PER_IP", "20"))
-    session_cookie: str = os.environ.get("SESSION_COOKIE", "mirror_sid")
-    cookie_secure: bool = _b("COOKIE_SECURE")  # set in prod (HTTPS) so the cookie is Secure
+    session_cookie: str = "mirror_sid"
+    cookie_secure: bool = _b("COOKIE_SECURE")
 
-    # --- resumable chunked upload: total-size guard (app-side, graceful) ---
-    # The export arrives as many small client-sliced chunks, assembled on disk (see
-    # mirror/uploads.py). This caps the TOTAL assembled size with a friendly error —
-    # a real, env-tunable limit sized to what the box can decode, NOT a proxy magic
-    # number. Large but finite; the true cost of a huge chat is CPU decode time.
+    # --- upload guard + paths ---
     max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "4096"))
-
     data_dir: str = os.environ.get("DATA_DIR", "/data")
-    web_dir: str = os.environ.get("WEB_DIR", "")   # built React SPA; empty -> placeholder pages
+    web_dir: str = os.environ.get("WEB_DIR", "")
+
+    @property
+    def nsfw_required(self) -> bool:
+        """If the NSFW detector can't load: fail CLOSED on the hosted exhibit
+        (captions skipped), fail open (but loud) on self-host."""
+        return self.hosted
 
     def frontier_ready(self) -> bool:
-        """True if at least one route can perform a read."""
         return any(r.ready() for r in self.routes)
 
     def default_route_id(self):
-        """READ_DEFAULT_ROUTE if set & valid, else the first ready route, else first."""
-        want = os.environ.get("READ_DEFAULT_ROUTE", "")
-        if want and any(r.id == want for r in self.routes):
-            return want
-        for r in self.routes:
-            if r.ready():
-                return r.id
         return self.routes[0].id if self.routes else None
 
     def route(self, route_id: str = None):
-        """Resolve a route by id; with no id, return the default route. None if absent."""
+        """The route (by id or default). None if nothing is configured."""
         if route_id:
             return next((r for r in self.routes if r.id == route_id), None)
-        did = self.default_route_id()
-        return next((r for r in self.routes if r.id == did), None)
+        return self.routes[0] if self.routes else None
 
     def public_routes(self) -> list:
         return [r.public() for r in self.routes]
 
     def frontier_hint(self) -> str:
-        return ("The read needs a frontier model. Configure a route — set ROUTE_A_* "
-                "(a managed API like OpenRouter) and/or ROUTE_B_* (your VPS), or the "
-                "legacy FRONTIER_BASE_URL/FRONTIER_MODEL. Or FRONTIER_PROVIDER=mock to "
-                "try the flow. See .env.example / READ_ROUTES.md.")
+        return ("The read needs a frontier model. Set ROUTE_A_BASE_URL + ROUTE_A_MODEL "
+                "+ ROUTE_A_API_KEY (e.g. OpenRouter), or ROUTE_A_PROVIDER=mock to try "
+                "the flow with no endpoint. See .env.example.")
 
 
 settings = Settings()

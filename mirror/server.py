@@ -4,10 +4,8 @@ API:
     GET    /api/config                  {hosted, frontier_ready, routes[], default_route, read_ttl_seconds}
     GET    /api/quota                   reads left for this cookie-session (hosted tier)
     POST   /api/upload                  zip + source -> job -> LOCAL preprocess (background)
-    GET    /api/jobs/{id}               status (poll): state, participants, progress, recent…
-    POST   /api/jobs/{id}/role          which participant is "me" (picked from the parsed list)
-    GET    /api/jobs/{id}/transcript    the exact text that will cross the boundary (review)
-    POST   /api/jobs/{id}/send          cross the boundary: run the read (form: route=<id>)
+    GET    /api/jobs/{id}               status (poll): state, progress, recent…
+    GET    /api/jobs/{id}/transcript    the exact text that crossed the boundary
     GET    /api/jobs/{id}/result        the read JSON (+ resolved citations)
     GET    /api/jobs/{id}/retained      what we currently hold (transparency panel)
     DELETE /api/jobs/{id}               delete everything for this job (returns a receipt)
@@ -24,7 +22,7 @@ from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, R
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, decode, transcript as T, frontier, jobs, budget, uploads
+from . import ingest, decode, transcript as T, frontier, jobs, budget, mediatypes, uploads
 from .config import settings
 
 HERE = Path(__file__).parent
@@ -110,9 +108,6 @@ def _check_route_auth():
               else msg, flush=True)
 
 
-_DECODABLE = {"image", "sticker", "audio", "video"}
-
-
 # ---- pipeline phases (background) ----
 def _preprocess(job_id: str):
     """Parse first (instant), then decode media (slow), streaming progress +
@@ -134,11 +129,11 @@ def _preprocess(job_id: str):
         # Iterative discovery decodes SPEECH up front (voice notes + video messages —
         # text-first); images are decoded on demand during the read loop. Otherwise:
         # cheap-all decode now.
-        to_decode = ([f for f in media if decode.file_type(f) in ("audio", "video")]
+        to_decode = ([f for f in media if mediatypes.kind(f) in ("audio", "video")]
                      if settings.iterative_discovery else media)
         # Drop anything already captioned without the VLM (Telegram .tgs emoji stickers).
         to_decode = [f for f in to_decode if f.name not in predecoded]
-        total = sum(1 for f in to_decode if decode.file_type(f) in _DECODABLE)
+        total = sum(1 for f in to_decode if mediatypes.kind(f) in mediatypes.DECODABLE)
         # Iterative discovery is text-first: the up-front pass transcribes speech (voice
         # notes + video messages); images are opened on demand during the read. Present it
         # as ONE "parsing" step — parse is already done; this is just speech (or instant).
@@ -231,7 +226,7 @@ def _image_files_for_ids(job_id: str, ids):
         hits = list(jobs.path(job_id, "export").rglob(nm))
         # .tgs (Telegram animated stickers) carry no raster to deepen — they're
         # already captioned from the message emoji, so never send them for a closer look.
-        if hits and decode.file_type(hits[0]) in ("image", "sticker") and hits[0].suffix.lower() != ".tgs":
+        if hits and mediatypes.kind(hits[0]) in ("image", "sticker") and hits[0].suffix.lower() != ".tgs":
             files.append(hits[0])
     return files
 
@@ -451,36 +446,12 @@ def status(job_id: str):
     return s
 
 
-@app.post("/api/jobs/{job_id}/role")
-def set_role(job_id: str, me: str = Form(...)):
-    if not jobs.exists(job_id):
-        raise HTTPException(404)
-    jobs.set_status(job_id, me=me)
-    return {"ok": True, "me": me}
-
-
 @app.get("/api/jobs/{job_id}/transcript", response_class=HTMLResponse)
 def get_transcript(job_id: str):
     p = jobs.path(job_id, "transcript.txt")
     if not p.exists():
         raise HTTPException(404, "not available")
     return f"<pre>{p.read_text()}</pre>"
-
-
-@app.post("/api/jobs/{job_id}/send")
-def send(job_id: str, bg: BackgroundTasks, route: str = Form(None)):
-    """Cross the boundary. `route` (optional) is the read backend the user picked;
-    omitted -> the default route. The chosen route is recorded on the job."""
-    if not jobs.path(job_id, "transcript.txt").exists():
-        raise HTTPException(409, "transcript not ready")
-    chosen = settings.route(route)
-    if route and chosen is None:
-        raise HTTPException(400, f"unknown route: {route}")
-    if chosen is None:
-        raise HTTPException(409, "no read route configured")
-    jobs.set_status(job_id, route=chosen.id)
-    bg.add_task(_read, job_id)
-    return {"ok": True, "route": chosen.id}
 
 
 @app.get("/api/jobs/{job_id}/result")
@@ -532,7 +503,7 @@ def messages(job_id: str, ids: str = ""):
         rich = []
         for f in m.get("media", []):
             rec = media_idx.get(f) or {}
-            rich.append({"file": f, "type": rec.get("type") or decode.file_type(Path(f)),
+            rich.append({"file": f, "type": rec.get("type") or mediatypes.kind(f),
                          "caption": decode._caption_of(rec) if rec else None})
         out.append({"id": m["id"], "ts": m["ts"], "sender": m["sender"],
                     "text": m["text"], "media": rich})
