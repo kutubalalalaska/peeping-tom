@@ -391,7 +391,7 @@ def _is_video_note(f: Path) -> bool:
     return "round_video" in str(f).lower() or "video_message" in str(f).lower()
 
 
-def decode_media(files, work: Path, on_progress=None, language: str = None) -> dict:
+def decode_media(files, work: Path, on_progress=None, language: str = None, on_reinspect=None) -> dict:
     """CHEAP-ALL pass. files: list[Path]. Returns {filename: record}. After each
     decoded item calls on_progress(done, total, item={file,type,caption|None}).
     Images/stickers/video use the small VISION_MODEL_FAST at decode_max_px_fast.
@@ -509,22 +509,30 @@ def decode_media(files, work: Path, on_progress=None, language: str = None) -> d
                     budget -= dur
             if chosen:
                 t0 = time.monotonic()
+                # Announce the re-inspection phase up front — BEFORE the big model loads
+                # (slow on CPU) — so the UI switches to its own "re-checking" counter
+                # immediately instead of sitting pinned at N/N while clips re-flow.
+                if on_reinspect:
+                    on_reinspect(0, len(chosen), None)
                 from faster_whisper import WhisperModel
                 del wm; gc.collect()
                 wm = WhisperModel(esc, device="cpu", compute_type="int8")
                 fixed = 0
-                for f, rec, reason in chosen:
+                for i, (f, rec, reason) in enumerate(chosen):
                     try:
                         tx2, _ = _transcribe(f, work, wm, language)
+                        if tx2 and tx2 != rec.get("transcript"):
+                            rec["transcript"] = tx2
+                            fixed += 1
+                        rec["asr"] = {"escalated": esc, "reason": reason}
                     except Exception:
-                        continue                     # keep the pass-1 text for this clip
-                    if tx2 and tx2 != rec.get("transcript"):
-                        rec["transcript"] = tx2
-                        fixed += 1
-                    rec["asr"] = {"escalated": esc, "reason": reason}
-                    if on_progress:
-                        on_progress(done, total, {"file": f.name, "type": rec.get("type"),
-                                                  "caption": _caption_of(rec)})
+                        pass                         # keep the pass-1 text for this clip
+                    # Report to the re-inspection channel (NOT on_progress) with its OWN
+                    # done/total, so a re-checked clip is framed as a second look, not a
+                    # duplicate first pass. Always advances — a failed clip still counts.
+                    if on_reinspect:
+                        on_reinspect(i + 1, len(chosen), {"file": f.name, "type": rec.get("type"),
+                                                          "caption": _caption_of(rec), "reinspected": True})
                 print(f"[whisper] escalation: {len(chosen)}/{len(suspects)} flagged clips re-run "
                       f"on {esc} in {time.monotonic() - t0:.0f}s | {fixed} transcripts replaced | "
                       f"cap {cap if cap > 0 else 'none'}s", flush=True)

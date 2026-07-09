@@ -103,6 +103,9 @@ const en = {
   "insp.parsingBody": "reading messages and transcribing voice notes — locally",
   "insp.phaseDecode": "decode",
   "insp.phaseTranscribe": "transcribe",
+  "insp.reinspectHero": "taking another pass on some media",
+  "insp.phaseReinspect": "re-checking",
+  "insp.reChecked": "re-checked",
   "insp.parsingShort": "parsing…",
   "insp.tips": [
     "the model reads what's implicit",
@@ -298,6 +301,9 @@ const ru: Dict = {
     "читаю сообщения и расшифровываю голосовые — локально",
   "insp.phaseDecode": "декодирование",
   "insp.phaseTranscribe": "расшифровка",
+  "insp.reinspectHero": "перепроверяю часть медиа",
+  "insp.phaseReinspect": "перепроверка",
+  "insp.reChecked": "перепроверено",
   "insp.parsingShort": "разбор…",
   "insp.tips": [
     "модель читает то, что подразумевается",
@@ -488,6 +494,9 @@ const it: Dict = {
     "leggo i messaggi e trascrivo i vocali — in locale",
   "insp.phaseDecode": "decodifica",
   "insp.phaseTranscribe": "trascrizione",
+  "insp.reinspectHero": "ricontrollo alcuni media",
+  "insp.phaseReinspect": "ricontrollo",
+  "insp.reChecked": "ricontrollato",
   "insp.parsingShort": "analisi…",
   "insp.tips": [
     "il modello legge ciò che è implicito",

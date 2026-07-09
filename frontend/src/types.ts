@@ -25,6 +25,7 @@ export interface RecentItem {
   file: string;
   type: string;
   caption?: string | null;
+  reinspected?: boolean;   // this glimpse is the tiered-ASR re-run of a clip, not a first pass
 }
 
 export interface Stats {
@@ -53,6 +54,7 @@ export interface JobStatus {
   me?: string;
   participants?: Participant[];
   progress?: Progress;
+  reinspect?: { done: number; total: number };  // tiered-ASR escalation: re-checking N flagged clips on the bigger model
   recent?: RecentItem[];
   partial_read?: string;       // the analysis, streaming in token-by-token (during `analyzing`)
   partial_thinking?: string;   // the model's live "thinking" view — process, not prose (during `analyzing`)

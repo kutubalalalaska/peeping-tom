@@ -167,13 +167,33 @@ def _preprocess(job_id: str):
             jobs.set_status(job_id, progress={"done": done, "total": total, "pct": pct},
                             recent=recent, eta_seconds=eta, eta_phase="transcribing")
 
+        # Tiered-ASR escalation reports on its OWN channel: a distinct phase with its own
+        # counter (reinspect.done/total) so re-checked clips read as a second look, not a
+        # duplicate first pass, and the main bar doesn't sit pinned at N/N while they flow.
+        reins_t0 = []                                    # start time for the re-inspection ETA
+        def on_reinspect(rdone: int, rtotal: int, item: dict):
+            if rdone == 0 or not reins_t0:
+                reins_t0[:] = [time.monotonic()]
+            cur = jobs.get_status(job_id) or {}
+            recent = cur.get("recent", [])
+            if item and item.get("caption"):
+                recent = (recent + [item])[-12:]         # item carries reinspected=True
+            eta = None
+            if rdone and rtotal and rdone < rtotal and reins_t0:
+                eta = round((time.monotonic() - reins_t0[0]) / rdone * (rtotal - rdone))
+            jobs.set_status(job_id,
+                            message="taking another pass on a few clips for a clearer transcript…",
+                            recent=recent, reinspect={"done": rdone, "total": rtotal},
+                            eta_seconds=eta, eta_phase="reinspecting")
+
         # Transcription language (general, per-chat): explicit override / forced per-clip auto /
         # else detect from the chat's own TEXT and apply to all clips (no audience assumption).
         wl = settings.whisper_language.strip().lower()
         lang = wl if (wl and wl != "auto") else (None if wl == "auto"
                                                  else decode.detect_language(" ".join(m.text for m in msgs if m.text)))
         print(f"[decode] transcription language: {lang or 'auto (per-clip)'}", flush=True)
-        decoded = decode.decode_media(to_decode, jobs.path(job_id, "work"), on_progress, language=lang)
+        decoded = decode.decode_media(to_decode, jobs.path(job_id, "work"), on_progress,
+                                      language=lang, on_reinspect=on_reinspect)
         decoded.update(predecoded)   # fold in the VLM-free captions (Telegram emoji stickers)
         jobs.path(job_id, "media.json").write_text(json.dumps(decoded, ensure_ascii=False, indent=2))
         jobs.path(job_id, "transcript.txt").write_text(T.assemble_for_read(msgs, decoded))
@@ -181,7 +201,7 @@ def _preprocess(job_id: str):
         jobs.path(job_id, "messages.json").write_text(json.dumps(
             [{"id": m.id, "ts": m.ts, "sender": m.sender, "text": m.text, "media": m.media} for m in msgs],
             ensure_ascii=False))
-        jobs.set_status(job_id, message="starting the read…",
+        jobs.set_status(job_id, message="starting the read…", reinspect=None,
                         progress={"done": total, "total": total, "pct": 100},
                         stats=T.stats(msgs, decoded), frontier_ready=settings.frontier_ready())
     except Exception as e:

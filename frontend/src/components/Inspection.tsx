@@ -58,11 +58,12 @@ function Carousel({ recent, sf, label }: { recent: RecentItem[]; sf: number; lab
           {recent.slice(-4).map((it, i, arr) => (
             <div
               className="lrow"
-              key={it.file}
+              key={it.file + "-" + i}
               style={{ opacity: 0.25 + 0.75 * ((i + 1) / arr.length) }}
             >
               [{tag(it.type)}] {it.file}
-              {it.caption ? ` “${it.caption.slice(0, 46)}”` : ""} ✓
+              {it.caption ? ` “${it.caption.slice(0, 46)}”` : ""}
+              {it.reinspected ? " ↻" : " ✓"}
             </div>
           ))}
         </div>
@@ -241,8 +242,18 @@ export default function Inspection() {
   // nor show an empty media stage.
   const uploading = state === "uploaded" || !state;
   const hasVisual = recent.some((it) => it.type !== "audio");
+  // Tiered-ASR escalation: after the first pass, garbage-scoring clips are re-run on
+  // the bigger model. It's a distinct phase with its OWN counter — otherwise the main
+  // bar sits pinned at N/N (100%) while re-checked clips keep flowing, reading as dups.
+  const reins = s?.reinspect;
+  const reinspecting = !uploading && !!reins && reins.total > 0;
+  const rDone = reins?.done ?? 0;
+  const rTotal = reins?.total ?? 0;
+  const rPct = rTotal ? Math.round((rDone / rTotal) * 100) : 0;
   const hero = uploading
     ? t("insp.uploadingHero")
+    : reinspecting
+    ? t("insp.reinspectHero")
     : hasVisual
     ? t("insp.decodingHero")
     : t("insp.parsingHero");
@@ -260,7 +271,11 @@ export default function Inspection() {
           </div>
         </div>
       ) : recent.length ? (
-        <Carousel recent={recent} sf={sf} label={t("insp.justDecoded")} />
+        <Carousel
+          recent={recent}
+          sf={sf}
+          label={reinspecting ? t("insp.reChecked") : t("insp.justDecoded")}
+        />
       ) : (
         <div className="pcontent">
           <div className="up">
@@ -271,11 +286,15 @@ export default function Inspection() {
         </div>
       )}
       <div className="barrow">
-        <span className="pre">{total ? progBar(pct) : scanBar(sf)}</span>
+        <span className="pre">
+          {reinspecting ? progBar(rPct) : total ? progBar(pct) : scanBar(sf)}
+        </span>
         <span className="phase">
           {spin}&nbsp;&nbsp;
           {uploading
             ? t("start.uploading")
+            : reinspecting
+            ? `${t("insp.phaseReinspect")}  ${rDone}/${rTotal}`
             : total
             ? `${t(hasVisual ? "insp.phaseDecode" : "insp.phaseTranscribe")}  ${done}/${total}`
             : t("insp.parsingShort")}
