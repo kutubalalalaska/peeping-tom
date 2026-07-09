@@ -58,7 +58,7 @@ export default function DataFlowModal({ open, onClose }: { open: boolean; onClos
     getConfig()
       .then((c) => {
         const rs = c.routes ?? [];
-        setCfg({ hosted: c.hosted, route: rs.find((r) => r.id === c.default_route) ?? rs[0] ?? null });
+        setCfg({ hosted: c.hosted, route: rs[0] ?? null });
       })
       .catch(() => undefined);
   }, [open]);

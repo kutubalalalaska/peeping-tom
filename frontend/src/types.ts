@@ -4,21 +4,29 @@ export type State =
   | "uploaded"
   | "uploading"
   | "inspecting"
-  | "ready"
   | "analyzing"
   | "done"
   | "needs_config"
   | "error";
 
-export interface Participant {
-  name: string;
-  count: number;
-}
+// Machine-readable pipeline phase (status.phase) — what the job is DOING,
+// independent of the coarser `state`. The Inspection screen renders from this.
+export type Phase =
+  | "parsing"
+  | "manifest"
+  | "reading"
+  | "requesting"
+  | "decoding"
+  | "folding"
+  | "composing"
+  | "done";
+
+export type Mode = "fast" | "deep";
 
 export interface Progress {
   done: number;
   total: number;
-  pct: number;
+  pct: number | null;
 }
 
 export interface RecentItem {
@@ -28,17 +36,28 @@ export interface RecentItem {
   reinspected?: boolean;   // this glimpse is the tiered-ASR re-run of a clip, not a first pass
 }
 
-export interface Stats {
-  messages: number;
-  date_range: [string, string] | [];
-  senders: Record<string, number>;
-  media_attached: number;
-  media_decoded: number;
+// One media request the read made (fast mode): which messages' media it wants
+// decoded and WHY — the reason is written for the person waiting.
+export interface MediaRequest {
+  ids: number[];
+  kind?: string;
+  reason?: string;
+  status: "pending" | "decoding" | "done" | "skipped";
 }
 
-export interface Deletion {
-  raw_media_deleted_at?: string;
-  transcript_deleted_at?: string;
+// Deep mode: the background decode producer's counters.
+export interface DecodeCounter {
+  done: number;
+  total: number;
+  reinspect?: { done: number; total: number } | null;
+  eta_seconds?: number | null;
+}
+
+// Deep mode: fold-round progress (evidence folded into the working read).
+export interface FoldCounter {
+  round: number;
+  evidence_seen: number;
+  evidence_total?: number | null;
 }
 
 export interface Retained {
@@ -49,46 +68,35 @@ export interface Retained {
 
 export interface JobStatus {
   state: State;
+  phase?: Phase;
+  mode?: Mode;
   message?: string;
-  source?: string;
-  me?: string;
-  participants?: Participant[];
   progress?: Progress;
-  reinspect?: { done: number; total: number };  // tiered-ASR escalation: re-checking N flagged clips on the bigger model
   recent?: RecentItem[];
+  media_requests?: MediaRequest[] | null;
+  decode?: DecodeCounter | null;
+  decode_done?: boolean;
+  fold?: FoldCounter | null;
   partial_read?: string;       // the analysis, streaming in token-by-token (during `analyzing`)
-  partial_thinking?: string;   // the model's live "thinking" view — process, not prose (during `analyzing`)
-  plan?: { tier: number; chunks?: number; form?: string; est_tokens?: number; script?: string };
-  stats?: Stats;
-  frontier_ready?: boolean;
-  deletion?: Deletion | null;
+  partial_thinking?: string;   // the model's live "thinking" view — process, not prose
+  plan?: { tier: number; chunks?: number; est_tokens?: number; script?: string };
   retained?: Retained;
   expires_at?: number | null;  // epoch seconds: when this read self-destructs (hosted tier)
-  eta_seconds?: number | null; // live, self-correcting estimate of time left in the current phase
-  eta_phase?: string;          // "transcribing" | "reading" — which phase the ETA is for
-  ts?: number;
+  eta_seconds?: number | null; // live, self-correcting estimate for the current phase
 }
 
-// A model the user can hand themselves to (the "switcher" / gallery of minds).
-// Reuses the route mechanism: each is sent to /send as `route`. The booleans are
-// the honest facts the UI surfaces — copy is narrative-thread work.
+// The single read route, as /api/config exposes it (no secrets).
 export interface ReadRoute {
   id: string;
-  kind: "managed_api" | "self_host" | "mock";
   model: string;
-  label: string;
-  lab?: string;            // who made it — "Z-AI" | "DeepSeek" | "Anthropic" | "OpenAI" | "Google" …
-  open_weight?: boolean;   // open-weight model vs proprietary (the switcher's headline distinction)
   third_party: boolean;
-  zero_retention: boolean;  // served under no-retention (ZDR) vs the provider may keep the transcript
-  expect_cold_start: boolean;
+  zero_retention: boolean;
   ready: boolean;
+  auth_ok?: boolean | null;
 }
 
 export interface AppConfig {
   hosted: boolean;
-  frontier_ready: boolean;
-  default_route?: string;
   routes?: ReadRoute[];
   read_ttl_seconds?: number;   // how long a read lives after it's ready (hosted tier)
 }
@@ -104,14 +112,13 @@ export interface Quota {
 }
 
 export interface ReadResult {
-  me: string;
   read: string;
   citations: number[];
+  citations_dropped?: number;  // invented ids the server stripped (observability)
+  mode?: Mode;
   route?: string;
   model?: string;
-  // two-pass read provenance (backend's agentic deepen step)
-  first_read?: string;
-  inspected?: string[];
+  inspected?: string[];        // media files decoded for this read
   deep_count?: number;
   expires_at?: number | null;  // epoch seconds: when this read self-destructs (hosted tier)
 }

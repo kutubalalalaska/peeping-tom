@@ -18,6 +18,7 @@ function friendlyError(e: unknown, rateMsg: string, tooLargeMsg: string): string
 
 type Platform = "whatsapp" | "telegram";
 type OS = "iphone" | "android";
+type ReadMode = "fast" | "deep";
 
 // The Telegram JSON export exists ONLY in the desktop.telegram.org build (mobile
 // can't export; the store apps do HTML at most, which this tool can't read) — the
@@ -30,6 +31,7 @@ export default function Start() {
   const onMobile = isMobileOS(detectedOS);
   const [platform, setPlatform] = useState<Platform | null>(null);
   const [os, setOs] = useState<OS>(detectedOS === "android" ? "android" : "iphone");
+  const [mode, setMode] = useState<ReadMode>("fast");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
@@ -59,7 +61,7 @@ export default function Start() {
     try {
       // Resumable chunked upload: shows real progress and survives a dropped
       // connection (retry from the server's byte offset). See mirror/uploads.py.
-      const { job_id } = await uploadChatChunked(file, platform, lang, {
+      const { job_id } = await uploadChatChunked(file, platform, lang, mode, {
         signal: abortRef.current.signal,
         onProgress: (received, total) => setPct(total ? Math.round((received / total) * 100) : 0),
       });
@@ -153,6 +155,29 @@ export default function Start() {
               </div>
             ))}
             <div>{t(handoffKey)}</div>
+          </div>
+        </div>
+        <div className="ln" style={{ animationDelay: "120ms" }}>
+          {/* The read mode: fast = text-first, the model requests only the media it
+              needs; deep = decode everything in parallel with the read. */}
+          <div className="row">
+            <button
+              type="button"
+              className={"opt" + (mode === "fast" ? " sel" : "")}
+              onClick={() => setMode("fast")}
+            >
+              {t("start.mode.fast")}
+            </button>
+            <button
+              type="button"
+              className={"opt" + (mode === "deep" ? " sel" : "")}
+              onClick={() => setMode("deep")}
+            >
+              {t("start.mode.deep")}
+            </button>
+          </div>
+          <div className="modesub">
+            {t(mode === "fast" ? "start.mode.fastSub" : "start.mode.deepSub")}
           </div>
         </div>
         <div className="ln" style={{ animationDelay: "160ms" }}>

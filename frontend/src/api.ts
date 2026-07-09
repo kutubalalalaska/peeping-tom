@@ -42,13 +42,14 @@ export async function uploadChatChunked(
   file: File,
   source: string,
   lang: string,
+  mode: string,
   opts: ChunkedOpts = {}
 ): Promise<{ job_id: string }> {
   const { onProgress, signal } = opts;
   const init = await asJson<{ job_id: string; chunk_size: number; max_mb: number }>(
     await fetch("/api/upload/init", {
       method: "POST",
-      body: fdOf({ source, lang, size: file.size, name: file.name }),
+      body: fdOf({ source, lang, mode, size: file.size, name: file.name }),
       signal,
     })
   );

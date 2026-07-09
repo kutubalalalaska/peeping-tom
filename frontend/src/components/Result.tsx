@@ -4,7 +4,6 @@ import { getResult, getRetained, getMessages, deleteJob, transcriptUrl } from ".
 import type { ReadResult, Retained, ReceiptMessage } from "../types";
 import Frame from "./Frame";
 import { useT } from "../lib/i18n";
-import { Bubble, sidesOf } from "./Bubbles";
 import ChatDrawer from "./ChatDrawer";
 
 // H:MM:SS when over an hour, else M:SS — for the self-destruct countdown.
@@ -16,31 +15,10 @@ const fmtClock = (s: number) => {
   return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
 };
 
-// A cited message-cluster, rendered inline as real chat bubbles. Each bubble is
-// clickable → the context drawer opens the full chat at that message.
-function ChatBubbles({
-  msgs,
-  sides,
-  jobId,
-  onOpen,
-}: {
-  msgs: ReceiptMessage[];
-  sides: Record<string, "me" | "them">;
-  jobId: string;
-  onOpen: (id: number) => void;
-}) {
-  return (
-    <div className="bubbles">
-      {msgs.map((m) => (
-        <Bubble key={m.id} m={m} side={sides[m.sender] ?? "them"} jobId={jobId} onOpen={onOpen} />
-      ))}
-    </div>
-  );
-}
-
-// Compact clickable citation chips — for LONG citation runs. Each opens the context
-// drawer at that message. Only resolvable ids reach here; unresolvable refs are
-// dropped upstream (a greyed, non-clickable badge just confused readers).
+// Clickable citation chips — the ONE citation affordance. Every chip opens the
+// context drawer at that message. The server validates citations before the
+// read is persisted, so ids here are real; the filter below is just defense
+// against a mid-TTL purge race.
 function CiteChips({ ids, onOpen }: { ids: number[]; onOpen: (id: number) => void }) {
   return (
     <span className="cites">
@@ -54,26 +32,20 @@ function CiteChips({ ids, onOpen }: { ids: number[]; onOpen: (id: number) => voi
 }
 
 const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
-const BUBBLE_CAP = 3; // runs up to this many ids stay inline bubbles; longer → chips
 // A citation run: one or more [#id] brackets, back to back, tolerating multi-id /
-// comma forms the model sometimes writes (e.g. [#12, #13]). Captured so split()
-// keeps it as its own token.
+// comma forms. Captured so split() keeps it as its own token.
 const CITE_RUN = /((?:\s*\[#\s*\d+(?:\s*,\s*#?\s*\d+)*\s*\])+)/g;
 const isCite = (tok: string) => /\[#\s*\d+/.test(tok);
 const idsIn = (tok: string) => [...new Set((tok.match(/\d+/g) || []).map(Number))];
 
-// The read: flowing prose. A SHORT citation run resolves to inline chat-bubble
-// evidence; a LONG run becomes clickable chips. Both open the context drawer at
-// that message. Unresolvable ids are dropped entirely (no confusing greyed badge);
-// malformed multi-id brackets still parse. `##` lines become a subheading.
+// The read: flowing prose; citation runs render as compact clickable chips that
+// open the context drawer. `##` lines become a subheading.
 function renderRead(
   text: string,
   msgs: Record<number, ReceiptMessage>,
-  jobId: string,
   onOpen: (id: number) => void
 ): ReactNode[] {
   const out: ReactNode[] = [];
-  const sides = sidesOf(Object.values(msgs));
   let firstProse = true;
   text.split(/\n\n+/).forEach((block, bi) => {
     const b = block.trim();
@@ -85,24 +57,9 @@ function renderRead(
     }
     b.split(CITE_RUN).forEach((tok, ti) => {
       if (isCite(tok)) {
-        // Only VALID refs are shown; unresolvable ids are dropped entirely. Short
-        // run -> inline bubbles, long run -> compact chips.
         const resolvable = idsIn(tok).filter((id) => msgs[id]);
         if (resolvable.length === 0) return;
-        const key = "c" + bi + "_" + ti;
-        if (resolvable.length <= BUBBLE_CAP) {
-          out.push(
-            <ChatBubbles
-              key={key}
-              msgs={resolvable.map((id) => msgs[id])}
-              sides={sides}
-              jobId={jobId}
-              onOpen={onOpen}
-            />
-          );
-        } else {
-          out.push(<CiteChips key={key} ids={resolvable} onOpen={onOpen} />);
-        }
+        out.push(<CiteChips key={"c" + bi + "_" + ti} ids={resolvable} onOpen={onOpen} />);
       } else {
         const p = tok.trim();
         if (p && !PUNCT_ONLY.test(p)) {
@@ -222,7 +179,7 @@ export default function Result() {
       )}
 
       <div className="read">
-        {renderRead(res.read, msgs, id ?? "", setDrawerFocus)}
+        {renderRead(res.read, msgs, setDrawerFocus)}
 
         {res.deep_count ? (
           <p className="prov">
