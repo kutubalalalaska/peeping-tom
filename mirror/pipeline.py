@@ -236,7 +236,7 @@ def _fulfil(ctx, requests, max_items, max_audio_s):
 
     total = len(speech) + len(visual)
     jobs.set_status(job_id, phase="decoding",
-                    message=f"decoding the {total} item(s) the read asked for — on this machine…",
+                    message=f"decoding the {total} item(s) the read asked for",
                     progress={"done": 0, "total": total, "pct": 0})
     t0 = time.monotonic()
     state = {"done": 0}

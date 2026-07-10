@@ -86,7 +86,7 @@ const en = {
     "decodes every photo and voice note while it reads, folding them in as evidence — the fullest read, slower.",
   "insp.requestsTitle": "what the read asked to open",
   "insp.requestingHero": "choosing what to open",
-  "insp.decodingReqHero": "opening what the read asked for",
+  "insp.decodingReqHero": "Clarifying some images",
   "insp.foldingHero": "revising with new evidence",
   "insp.foldRound": "revising the read · round {round}",
   "insp.bgDecode": "decoding media in the background  {done}/{total}",

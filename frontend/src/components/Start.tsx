@@ -4,6 +4,7 @@ import { uploadChatChunked, getConfig } from "../api";
 import { useT } from "../lib/i18n";
 import { detectOS, isMobileOS } from "../lib/platform";
 import { progBar } from "../lib/ascii";
+import { fmtEta } from "../lib/fmt";
 import Frame from "./Frame";
 import Slicer from "./Slicer";
 
@@ -38,6 +39,8 @@ export default function Start() {
   const [sliceRange, setSliceRange] = useState<string>("");    // honest provenance of a slice
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
+  const [upEta, setUpEta] = useState<number | null>(null);
+  const upStart = useRef(0);
   const [err, setErr] = useState<string | null>(null);
   const [hosted, setHosted] = useState(false);
   const [capMB, setCapMB] = useState(0);
@@ -80,13 +83,23 @@ export default function Start() {
     setErr(null);
     setBusy(true);
     setPct(0);
+    setUpEta(null);
+    upStart.current = Date.now();
     abortRef.current = new AbortController();
     try {
       // Resumable chunked upload: shows real progress and survives a dropped
       // connection (retry from the server's byte offset). See mirror/uploads.py.
       const { job_id } = await uploadChatChunked(file, platform, lang, mode, {
         signal: abortRef.current.signal,
-        onProgress: (received, total) => setPct(total ? Math.round((received / total) * 100) : 0),
+        onProgress: (received, total) => {
+          setPct(total ? Math.round((received / total) * 100) : 0);
+          // Self-correcting ETA: elapsed/received × remaining. Held back for the
+          // first seconds — a one-chunk sample reads as noise, not an estimate.
+          const elapsed = (Date.now() - upStart.current) / 1000;
+          setUpEta(elapsed > 2 && received > 0 && received < total
+            ? (elapsed / received) * (total - received)
+            : null);
+        },
         sliceRange: sliceRange || undefined,
       });
       nav(`/job/${job_id}`);
@@ -240,7 +253,14 @@ export default function Start() {
               [ {busy ? `${t("start.uploading")} ${pct}%` : t("start.uploadBtn")} ]
             </button>
           </div>
-          {busy && <pre className="uppre">{progBar(pct)}</pre>}
+          {busy && (
+            <pre className="uppre">
+              {progBar(pct)}
+              {upEta != null && (
+                <span className="eta">{`  ·  ${t("insp.etaLeft", { eta: fmtEta(upEta) })}`}</span>
+              )}
+            </pre>
+          )}
           {hosted && (
             <label className="consent">
               <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />

@@ -4,19 +4,12 @@ import { getStatus } from "../api";
 import type { JobStatus, MediaRequest, RecentItem } from "../types";
 import Frame from "./Frame";
 import { SPIN, seedOf, thumb, wave, player, progBar, scanBar } from "../lib/ascii";
+import { fmtEta } from "../lib/fmt";
 import { useSpinFrame } from "../lib/hooks";
 import { useT } from "../lib/i18n";
 
 const tag = (t: string) =>
   t === "sticker" ? "stk" : t === "video" ? "vid" : t === "audio" ? "aud" : "img";
-
-// Coarse, honest ETA formatting ("~3m left"). Rounds to keep it from looking falsely precise.
-function fmtEta(s: number): string {
-  if (s == null || s < 0) return "";
-  if (s < 60) return `${Math.round(s)}s`;
-  const m = Math.round(s / 60);
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
-}
 
 // One decoded item rendered as ASCII (the design replaces real imagery with text).
 function Glimpse({ item, sf }: { item: RecentItem; sf: number }) {
