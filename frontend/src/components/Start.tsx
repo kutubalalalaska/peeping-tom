@@ -41,7 +41,12 @@ export default function Start() {
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
   const [upEta, setUpEta] = useState<number | null>(null);
-  const upStart = useRef(0);
+  const [bgPaused, setBgPaused] = useState(false);   // a background pause happened this upload
+  // ETA baseline: rate is measured from the last RESUME, not from upload start —
+  // a background pause (Safari suspends hidden tabs) would otherwise poison it.
+  const upBase = useRef({ t: 0, received: 0 });
+  const lastReceived = useRef(0);
+  const busyRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
   const [hosted, setHosted] = useState(false);
   const [capMB, setCapMB] = useState(0);
@@ -94,14 +99,44 @@ export default function Start() {
   // Abort an in-flight upload if the user navigates away mid-transfer.
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Mid-upload guards: Safari suspends background tabs (the chunk chain stalls
+  // until the tab returns — resumable, but it LOOKS hung), so (a) surface an
+  // honest hint once a pause happened, (b) restart the ETA rate window on wake,
+  // (c) warn before closing the tab while an upload is in flight.
+  useEffect(() => {
+    const onVis = () => {
+      if (!busyRef.current) return;
+      if (document.hidden) {
+        setBgPaused(true);
+        setUpEta(null);
+      } else {
+        upBase.current = { t: Date.now(), received: lastReceived.current };
+      }
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!busyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, []);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!file || !platform || (hosted && !agreed)) return;
     setErr(null);
     setBusy(true);
+    busyRef.current = true;
+    setBgPaused(false);
     setPct(0);
     setUpEta(null);
-    upStart.current = Date.now();
+    upBase.current = { t: Date.now(), received: 0 };
+    lastReceived.current = 0;
     abortRef.current = new AbortController();
     try {
       // Resumable chunked upload: shows real progress and survives a dropped
@@ -109,18 +144,23 @@ export default function Start() {
       const { job_id } = await uploadChatChunked(file, platform, lang, mode, {
         signal: abortRef.current.signal,
         onProgress: (received, total) => {
+          lastReceived.current = received;
           setPct(total ? Math.round((received / total) * 100) : 0);
-          // Self-correcting ETA: elapsed/received × remaining. Held back for the
-          // first seconds — a one-chunk sample reads as noise, not an estimate.
-          const elapsed = (Date.now() - upStart.current) / 1000;
-          setUpEta(elapsed > 2 && received > 0 && received < total
-            ? (elapsed / received) * (total - received)
+          // Self-correcting ETA over the CURRENT rate window (reset on tab wake).
+          // Held back for the first seconds — one chunk is noise, not an estimate.
+          const base = upBase.current;
+          const elapsed = (Date.now() - base.t) / 1000;
+          const gained = received - base.received;
+          setUpEta(elapsed > 2 && gained > 0 && received < total
+            ? (total - received) / (gained / elapsed)
             : null);
         },
         sliceRange: sliceRange || undefined,
       });
+      busyRef.current = false;
       nav(`/job/${job_id}`);
     } catch (e) {
+      busyRef.current = false;
       if ((e as Error)?.name === "AbortError") return; // navigated away — nothing to show
       setErr(friendlyError(e, t("start.errRate"), t("start.errTooLarge")));
       setBusy(false);
@@ -271,12 +311,15 @@ export default function Start() {
             </button>
           </div>
           {busy && (
-            <pre className="uppre">
-              {progBar(pct)}
-              {upEta != null && (
-                <span className="eta">{`  ·  ${t("insp.etaLeft", { eta: fmtEta(upEta) })}`}</span>
-              )}
-            </pre>
+            <>
+              <pre className="uppre">
+                {progBar(pct)}
+                {upEta != null && (
+                  <span className="eta">{`  ·  ${t("insp.etaLeft", { eta: fmtEta(upEta) })}`}</span>
+                )}
+              </pre>
+              {bgPaused && <div className="bgbar">{t("start.bgPause")}</div>}
+            </>
           )}
           {hosted && (
             <label className="consent">

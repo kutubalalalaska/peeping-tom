@@ -47,6 +47,7 @@ const en = {
     "this is my own conversation and it contains no illegal content.",
   "start.errRate": "You've reached your reads for now. Try again later.",
   "start.errTooLarge": "That chat export is too large to upload here.",
+  "start.bgPause": "uploads pause while this tab is in the background — keep it visible until done.",
   "start.wa.iphone": [
     "open the chat in whatsapp.",
     "tap the contact / group name at the top.",
@@ -265,6 +266,7 @@ const ru: Dict = {
   "start.errRate":
     "Вы исчерпали лимит разборов на сейчас. Попробуйте позже.",
   "start.errTooLarge": "Этот экспорт чата слишком большой для загрузки здесь.",
+  "start.bgPause": "загрузка приостанавливается, пока вкладка в фоне — держите её открытой до конца.",
   "start.wa.iphone": [
     "откройте чат в whatsapp.",
     "нажмите на имя контакта / группы вверху.",
@@ -480,6 +482,7 @@ const it: Dict = {
   "start.errRate":
     "Hai raggiunto il limite di letture per ora. Riprova più tardi.",
   "start.errTooLarge": "Questo export della chat è troppo grande per caricarlo qui.",
+  "start.bgPause": "il caricamento si mette in pausa quando la scheda è in background — tienila visibile fino alla fine.",
   "start.wa.iphone": [
     "apri la chat in whatsapp.",
     "tocca il nome del contatto / gruppo in alto.",
