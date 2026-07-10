@@ -217,7 +217,9 @@ class Settings:
     cookie_secure: bool = _b("COOKIE_SECURE")
 
     # --- upload guard + paths ---
-    max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "4096"))
+    # v0 decision (2026-07-10): sized so any accepted chat reads in ONE coherent
+    # pass — the client-side slicer enforces the token axis, this caps the bytes.
+    max_upload_mb: int = int(os.environ.get("MAX_UPLOAD_MB", "1536"))
     data_dir: str = os.environ.get("DATA_DIR", "/data")
     web_dir: str = os.environ.get("WEB_DIR", "")
 

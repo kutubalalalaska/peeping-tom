@@ -7,7 +7,7 @@
 // slices it (tail) and writes /tmp/sliced-export.zip for an upload smoke test.
 
 import { BlobReader, BlobWriter, TextReader, TextWriter, ZipReader, ZipWriter } from "@zip.js/zip.js";
-import { openExport, planWindow, rangeBytes, rangeLabel, buildSlice } from "./src/lib/slicer";
+import { ONE_PASS_TOKENS, openExport, planWindow, rangeBytes, rangeTokens, rangeLabel, buildSlice, fitsBudget } from "./src/lib/slicer";
 import { readFileSync, writeFileSync } from "node:fs";
 
 let passed = 0;
@@ -56,16 +56,16 @@ async function testWhatsApp() {
   check("parsed all messages", model.msgs.length === 60, `${model.msgs.length}`);
   check("media mapped", model.msgs.filter((m) => m.media.length).length === 12);
 
-  const budget = 6 * MB;
+  const budget = { bytes: 6 * MB, tokens: ONE_PASS_TOKENS };
   const [f1, t1] = planWindow(model, budget, "tail");
-  check("tail plan fits", rangeBytes(model, f1, t1) <= budget && t1 === 60 && f1 > 0, `[${f1},${t1})`);
+  check("tail plan fits", fitsBudget(model, f1, t1, budget) && t1 === 60 && f1 > 0, `[${f1},${t1})`);
   const [f2, t2] = planWindow(model, budget, "head");
-  check("head plan fits", rangeBytes(model, f2, t2) <= budget && f2 === 0 && t2 < 60, `[${f2},${t2})`);
+  check("head plan fits", fitsBudget(model, f2, t2, budget) && f2 === 0 && t2 < 60, `[${f2},${t2})`);
   const [f3, t3] = planWindow(model, budget, "middle");
-  check("middle plan fits", rangeBytes(model, f3, t3) <= budget && f3 > 0 && t3 < 60, `[${f3},${t3})`);
+  check("middle plan fits", fitsBudget(model, f3, t3, budget) && f3 > 0 && t3 < 60, `[${f3},${t3})`);
 
   const { file: sliced, range } = await buildSlice(model, f1, t1);
-  check("slice under cap", sliced.size <= budget + MB, `${(sliced.size / MB).toFixed(1)}MB`);
+  check("slice under cap", sliced.size <= budget.bytes + MB, `${(sliced.size / MB).toFixed(1)}MB`);
   check("range label", /^\d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}$/.test(range), range);
 
   const rd = new ZipReader(new BlobReader(sliced));
@@ -104,12 +104,12 @@ async function testTelegram() {
 
   const model = await openExport(zip, "telegram");
   check("parsed rows", model.msgs.length === 40, `${model.msgs.length}`);
-  const budget = 5 * MB;
+  const budget = { bytes: 5 * MB, tokens: ONE_PASS_TOKENS };
   const [f, t] = planWindow(model, budget, "tail");
-  check("tail plan fits", rangeBytes(model, f, t) <= budget && t === 40 && f > 0, `[${f},${t})`);
+  check("tail plan fits", fitsBudget(model, f, t, budget) && t === 40 && f > 0, `[${f},${t})`);
 
   const { file: sliced } = await buildSlice(model, f, t);
-  check("slice under cap", sliced.size <= budget + MB, `${(sliced.size / MB).toFixed(1)}MB`);
+  check("slice under cap", sliced.size <= budget.bytes + MB, `${(sliced.size / MB).toFixed(1)}MB`);
   const rd = new ZipReader(new BlobReader(sliced));
   const entries = await rd.getEntries();
   const resEntry = entries.find((e) => e.filename === "Export/result.json")!;
@@ -127,14 +127,36 @@ async function testReal(path: string, capMB: number) {
   const t0 = Date.now();
   const model = await openExport(file, "whatsapp");
   console.log(`  parsed ${model.msgs.length} msgs, ${model.mediaBytes.size} entries in ${Date.now() - t0}ms`);
-  const budget = Math.floor(capMB * MB * 0.97);
+  const budget = { bytes: Math.floor(capMB * MB * 0.97), tokens: ONE_PASS_TOKENS };
   const [f, t] = planWindow(model, budget, "tail");
-  console.log(`  tail window [${f},${t}) = ${rangeLabel(model, f, t)} ≈ ${(rangeBytes(model, f, t) / MB).toFixed(0)}MB`);
-  check("real: plan fits", rangeBytes(model, f, t) <= budget && t === model.msgs.length);
+  console.log(`  tail window [${f},${t}) = ${rangeLabel(model, f, t)} ≈ ${(rangeBytes(model, f, t) / MB).toFixed(0)}MB / ~${Math.round(rangeTokens(model, f, t) / 1000)}k tok`);
+  check("real: plan fits", fitsBudget(model, f, t, budget) && t === model.msgs.length);
   const { file: sliced, range } = await buildSlice(model, f, t);
   check("real: slice under cap", sliced.size <= capMB * MB, `${(sliced.size / MB).toFixed(0)}MB`);
   writeFileSync("/tmp/sliced-export.zip", Buffer.from(await sliced.arrayBuffer()));
   console.log(`  wrote /tmp/sliced-export.zip (${(sliced.size / MB).toFixed(0)}MB, range ${range})`);
+}
+
+async function testTokenBound() {
+  console.log("[tok] text-heavy chat: 40k msgs, no media, tiny zip — token axis binds");
+  const lines: string[] = [];
+  for (let i = 0; i < 40_000; i++) {
+    const day = 1 + (i % 28), month = 1 + Math.floor(i / 3400) % 12;
+    lines.push(`[${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.2024, 10:00:00] Anna: ${"chatter words here again and again ".repeat(2)}${i}`);
+  }
+  const zip = await makeZip({ "chat/_chat.txt": lines.join("\n") });
+  check("zip itself is small", zip.size < 20 * MB, `${(zip.size / MB).toFixed(1)}MB`);
+  const model = await openExport(zip, "whatsapp");
+  const total = rangeTokens(model, 0, model.msgs.length);
+  check("full chat overflows one pass", total > ONE_PASS_TOKENS, `${Math.round(total / 1000)}k tok`);
+  const budget = { bytes: 1536 * MB, tokens: ONE_PASS_TOKENS };
+  const [f, t] = planWindow(model, budget, "tail");
+  check("token-bound tail plan fits", fitsBudget(model, f, t, budget) && t === model.msgs.length && f > 0,
+        `[${f},${t}) ~${Math.round(rangeTokens(model, f, t) / 1000)}k tok`);
+  const { file: sliced } = await buildSlice(model, f, t);
+  const re = await openExport(sliced, "whatsapp");
+  check("rebuilt slice reads under one pass", rangeTokens(re, 0, re.msgs.length) <= ONE_PASS_TOKENS,
+        `${Math.round(rangeTokens(re, 0, re.msgs.length) / 1000)}k tok`);
 }
 
 const [, , realPath, cap] = process.argv;
@@ -143,5 +165,6 @@ if (realPath) {
 } else {
   await testWhatsApp();
   await testTelegram();
+  await testTokenBound();
 }
 console.log(`\nALL ${passed} CHECKS PASS`);

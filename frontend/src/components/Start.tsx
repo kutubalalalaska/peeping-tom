@@ -5,6 +5,7 @@ import { useT } from "../lib/i18n";
 import { detectOS, isMobileOS } from "../lib/platform";
 import { progBar } from "../lib/ascii";
 import { fmtEta } from "../lib/fmt";
+import { ONE_PASS_TOKENS, openExport, rangeTokens } from "../lib/slicer";
 import Frame from "./Frame";
 import Slicer from "./Slicer";
 
@@ -61,11 +62,27 @@ export default function Start() {
       .catch(() => undefined);
   }, []);
 
-  function pickFile(f: File | null) {
+  async function pickFile(f: File | null) {
     setErr(null);
     setSliceRange("");
-    if (f && capMB && f.size > capMB * 1024 * 1024) {
-      // Too big to upload — offer to cut a date window LOCALLY instead of a 413.
+    if (!f) {
+      setOversize(null);
+      setFile(null);
+      return;
+    }
+    // Two gates, both checked BEFORE any byte uploads: the byte cap, and the
+    // one-pass read window (a 30MB zip can still hold 100k messages of text —
+    // size alone can't catch that). Either overflow → offer the local slicer.
+    let over = !!capMB && f.size > capMB * 1024 * 1024;
+    if (!over && platform) {
+      try {
+        const m = await openExport(f, platform);
+        over = rangeTokens(m, 0, m.msgs.length) > ONE_PASS_TOKENS;
+      } catch {
+        // unreadable here — let the server's parser have its own try
+      }
+    }
+    if (over) {
       setFile(null);
       setOversize(f);
       return;

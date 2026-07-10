@@ -21,19 +21,60 @@ import {
 export interface SliceMsg {
   date: number;          // epoch ms
   media: string[];       // zip entry names (full paths) attached to this message
+  chars: number;         // text length (drives the token estimate)
   lineStart?: number;    // WhatsApp: raw line span incl. continuation lines
   lineEnd?: number;      //   (half-open)
+}
+
+// One-pass read budget, mirroring mirror/budget.py conservatively: the window
+// the backend plans against is (262144 - 8000) x 0.9 ≈ 229k tokens, but the
+// transcript GROWS after upload (decoded voice transcripts + captions), so the
+// slicer holds a chat well under it. ≈ 25-40k typical messages.
+export const ONE_PASS_TOKENS = 160_000;
+
+// chars-per-token by dominant script (mirror/budget.py _CPT — deliberately a
+// touch low, so the estimate is a touch high = conservative).
+const CPT: Record<string, number> = { latin: 4.0, cyrillic: 2.3, cjk: 1.6, other: 3.0 };
+
+function dominantCpt(sample: string): number {
+  let lat = 0, cyr = 0, cjk = 0;
+  for (let i = 0; i < Math.min(sample.length, 200_000); i++) {
+    const cp = sample.charCodeAt(i);
+    if (cp >= 0x400 && cp <= 0x4ff) cyr++;
+    else if ((cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3040 && cp <= 0x30ff) || (cp >= 0xac00 && cp <= 0xd7a3)) cjk++;
+    else if ((cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122)) lat++;
+  }
+  if (!lat && !cyr && !cjk) return CPT.other;
+  const top = Math.max(lat, cyr, cjk);
+  return top === cyr ? CPT.cyrillic : top === cjk ? CPT.cjk : CPT.latin;
 }
 
 export interface ExportModel {
   source: "whatsapp" | "telegram";
   chatEntry: FileEntry;
   msgs: SliceMsg[];
+  cpt: number;                       // chars-per-token for this chat's dominant script
   mediaBytes: Map<string, number>;   // entry name -> uncompressed size
   entryByName: Map<string, FileEntry>;
   waLines?: string[];                // WhatsApp: the chat file's raw lines
   tgRoot?: Record<string, unknown>;  // Telegram: parsed result.json (messages swapped on build)
   tgRows?: unknown[];                // Telegram: raw message rows aligned with msgs? (see below)
+}
+
+export interface SliceBudget {
+  bytes: number;    // the upload cap's share for media + chat file
+  tokens: number;   // the one-pass read window (ONE_PASS_TOKENS)
+}
+
+// Estimated read tokens for a message window: text + per-line prefix overhead
+// (#id/time/sender ≈ 9) + a media-label allowance per attachment.
+export function rangeTokens(model: ExportModel, from: number, to: number): number {
+  let t = 60;                                     // FORMAT/manifest header allowance
+  for (let i = from; i < to; i++) {
+    const m = model.msgs[i];
+    t += Math.ceil(m.chars / model.cpt) + 9 + m.media.length * 15;
+  }
+  return t;
 }
 
 const JUNK = (name: string) =>
@@ -99,10 +140,11 @@ function parseWhatsApp(text: string, entryOfBase: Map<string, string>): { msgs: 
       const ts = parseTs(m[1].replace(LRM, "").trim(), dayFirst);
       if (ts !== null) {
         if (msgs.length) msgs[msgs.length - 1].lineEnd = i;
-        msgs.push({ date: ts, media: [], lineStart: i, lineEnd: lines.length });
+        msgs.push({ date: ts, media: [], chars: 0, lineStart: i, lineEnd: lines.length });
       }
     }
-    if (msgs.length && attach.length) {
+    if (msgs.length) {
+      msgs[msgs.length - 1].chars += line.length;
       for (const a of attach) {
         const entry = entryOfBase.get(a.split("/").pop()!);
         if (entry) msgs[msgs.length - 1].media.push(entry);
@@ -153,14 +195,19 @@ export async function openExport(file: File, source: "whatsapp" | "telegram"): P
           : entryOfBase.get(ref.split("/").pop()!);
         if (hit) media.push(hit);
       }
-      msgs.push({ date: ts, media });
+      const body = typeof r.text === "string" ? r.text : JSON.stringify(r.text ?? "");
+      msgs.push({ date: ts, media, chars: body.length + 24 });
       tgRows.push(row);
     }
-    return { source, chatEntry, msgs, mediaBytes, entryByName, tgRoot: root, tgRows };
+    const cptTg = dominantCpt(msgs.map((_, i) => {
+      const r = tgRows[i] as Record<string, unknown>;
+      return typeof r.text === "string" ? r.text : "";
+    }).join(" "));
+    return { source, chatEntry, msgs, cpt: cptTg, mediaBytes, entryByName, tgRoot: root, tgRows };
   }
 
   const { msgs, lines } = parseWhatsApp(text, entryOfBase);
-  return { source, chatEntry, msgs, mediaBytes, entryByName, waLines: lines };
+  return { source, chatEntry, msgs, cpt: dominantCpt(text), mediaBytes, entryByName, waLines: lines };
 }
 
 // ---- window planning ------------------------------------------------------------
@@ -168,6 +215,10 @@ export async function openExport(file: File, source: "whatsapp" | "telegram"): P
 function msgBytes(model: ExportModel): number[] {
   return model.msgs.map((m) =>
     m.media.reduce((s, name) => s + (model.mediaBytes.get(name) ?? 0), 0));
+}
+
+function msgTokens(model: ExportModel): number[] {
+  return model.msgs.map((m) => Math.ceil(m.chars / model.cpt) + 9 + m.media.length * 15);
 }
 
 export function rangeBytes(model: ExportModel, from: number, to: number): number {
@@ -186,37 +237,50 @@ export function rangeBytes(model: ExportModel, from: number, to: number): number
   return total + (model.chatEntry.uncompressedSize ?? 0) + seen.size * 256;
 }
 
+export function fitsBudget(model: ExportModel, from: number, to: number, budget: SliceBudget): boolean {
+  return rangeBytes(model, from, to) <= budget.bytes && rangeTokens(model, from, to) <= budget.tokens;
+}
+
 export function planWindow(
   model: ExportModel,
-  budget: number,
+  budget: SliceBudget,
   anchor: "head" | "tail" | "middle"
 ): [number, number] {
+  // Greedy over BOTH axes: a message costs media bytes AND estimated tokens;
+  // the window grows while both budgets hold (then an exact check trims for
+  // dedup/overhead the running sums don't see).
   const bytes = msgBytes(model);
+  const toks = msgTokens(model);
   const n = bytes.length;
   if (!n) return [0, 0];
-  const fits = (f: number, t: number) => rangeBytes(model, f, t) <= budget;
+  const fits = (f: number, t: number) => fitsBudget(model, f, t, budget);
+  const ok = (accB: number, accT: number) => accB <= budget.bytes && accT <= budget.tokens;
   if (anchor === "tail") {
-    let from = n;
-    let acc = 0;
-    while (from > 0 && acc + bytes[from - 1] <= budget) acc += bytes[--from];
-    while (from < n && !fits(from, n)) from++;      // exact check (dedup + overhead)
+    let from = n, accB = 0, accT = 0;
+    while (from > 0 && ok(accB + bytes[from - 1], accT + toks[from - 1])) {
+      accB += bytes[from - 1]; accT += toks[from - 1]; from--;
+    }
+    while (from < n && !fits(from, n)) from++;
     return [from, n];
   }
   if (anchor === "head") {
-    let to = 0;
-    let acc = 0;
-    while (to < n && acc + bytes[to] <= budget) acc += bytes[to++];
+    let to = 0, accB = 0, accT = 0;
+    while (to < n && ok(accB + bytes[to], accT + toks[to])) {
+      accB += bytes[to]; accT += toks[to]; to++;
+    }
     while (to > 0 && !fits(0, to)) to--;
     return [0, to];
   }
   // middle: expand symmetrically from the center
-  let lo = Math.floor(n / 2), hi = lo;
-  let acc = 0;
+  let lo = Math.floor(n / 2), hi = lo, accB = 0, accT = 0;
   while (lo > 0 || hi < n) {
-    const takeLo = lo > 0 && (hi >= n || acc + bytes[lo - 1] <= acc + bytes[hi]);
-    if (takeLo && acc + bytes[lo - 1] <= budget) { acc += bytes[--lo]; continue; }
-    if (hi < n && acc + bytes[hi] <= budget) { acc += bytes[hi++]; continue; }
-    break;
+    const canLo = lo > 0 && ok(accB + bytes[lo - 1], accT + toks[lo - 1]);
+    const canHi = hi < n && ok(accB + bytes[hi], accT + toks[hi]);
+    if (canLo && (!canHi || bytes[lo - 1] + toks[lo - 1] <= bytes[hi] + toks[hi])) {
+      lo--; accB += bytes[lo]; accT += toks[lo];
+    } else if (canHi) {
+      accB += bytes[hi]; accT += toks[hi]; hi++;
+    } else break;
   }
   while (lo < hi && !fits(lo, hi)) (hi - lo) % 2 ? hi-- : lo++;
   return [lo, hi];

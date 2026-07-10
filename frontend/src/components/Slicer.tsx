@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useT } from "../lib/i18n";
 import { progBar } from "../lib/ascii";
 import {
+  ONE_PASS_TOKENS,
   buildSlice,
+  fitsBudget,
   openExport,
   planWindow,
   rangeBytes,
   rangeLabel,
   type ExportModel,
+  type SliceBudget,
 } from "../lib/slicer";
 
 const GB = 1024 * 1024 * 1024;
@@ -37,8 +40,13 @@ export default function Slicer({
   const [range, setRange] = useState<[number, number]>([0, 0]);
   const [building, setBuilding] = useState<[number, number] | null>(null);
 
-  // The budget the slice must fit: the cap minus headroom for zip structure.
-  const budget = Math.floor(capMB * 1024 * 1024 * 0.97);
+  // Two budgets a slice must fit: the upload cap's bytes (minus zip headroom)
+  // AND the one-pass read window in estimated tokens — so anything that leaves
+  // this screen is guaranteed a single coherent read.
+  const budget: SliceBudget = useMemo(
+    () => ({ bytes: Math.floor(capMB * 1024 * 1024 * 0.97), tokens: ONE_PASS_TOKENS }),
+    [capMB]
+  );
 
   useEffect(() => {
     let alive = true;
@@ -60,7 +68,9 @@ export default function Slicer({
     () => (model && to > from ? rangeBytes(model, from, to) : 0),
     [model, from, to]
   );
-  const fits = est > 0 && est <= budget;
+  const fits = !!model && to > from && fitsBudget(model, from, to, budget);
+  // Which axis triggered the slicer: raw size, or sheer message volume.
+  const tooLong = file.size <= capMB * 1024 * 1024;
   const n = model?.msgs.length ?? 0;
   const step = Math.max(1, Math.floor(n / 400));
 
@@ -93,7 +103,9 @@ export default function Slicer({
     return (
       <div className="slicebox">
         <div className="notice">
-          <strong>{t("slice.tooBig", { size: fmtSize(file.size), cap: fmtSize(capMB * 1048576) })}</strong>
+          <strong>{tooLong
+            ? t("slice.tooLong")
+            : t("slice.tooBig", { size: fmtSize(file.size), cap: fmtSize(capMB * 1048576) })}</strong>
           {t("slice.reading")}
         </div>
       </div>
@@ -114,7 +126,9 @@ export default function Slicer({
   return (
     <div className="slicebox">
       <div className="notice">
-        <strong>{t("slice.tooBig", { size: fmtSize(file.size), cap: fmtSize(capMB * 1048576) })}</strong>
+        <strong>{tooLong
+            ? t("slice.tooLong")
+            : t("slice.tooBig", { size: fmtSize(file.size), cap: fmtSize(capMB * 1048576) })}</strong>
         {t("slice.pick")}
       </div>
       <div className="row">
