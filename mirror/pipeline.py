@@ -561,7 +561,9 @@ def _persist(ctx, final):
         {"read": final, "citations": citations, "citations_dropped": dropped,
          "route": route.id, "model": route.model, "mode": ctx["mode_name"],
          "expires_at": expires_at, "inspected": ctx["inspected"],
-         "deep_count": len(ctx["inspected"])},
+         "deep_count": len(ctx["inspected"]),
+         # honest provenance: the date window the user cut the export down to
+         "slice_range": (jobs.get_status(job_id) or {}).get("slice_range")},
         ensure_ascii=False, indent=2))
     if settings.ephemeral:
         jobs.delete_raw(job_id)

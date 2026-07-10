@@ -99,6 +99,7 @@ export interface AppConfig {
   hosted: boolean;
   routes?: ReadRoute[];
   read_ttl_seconds?: number;   // how long a read lives after it's ready (hosted tier)
+  max_upload_mb?: number;      // upload cap — powers the client-side slicer offer
 }
 
 // Reads left for this cookie-session (hosted tier). No PII — keyed on an opaque
@@ -121,6 +122,7 @@ export interface ReadResult {
   inspected?: string[];        // media files decoded for this read
   deep_count?: number;
   expires_at?: number | null;  // epoch seconds: when this read self-destructs (hosted tier)
+  slice_range?: string | null; // the date window a too-big export was cut to (client-side)
 }
 
 // A cited message, resolved for a clickable [#id] receipt.

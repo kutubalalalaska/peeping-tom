@@ -5,6 +5,7 @@ import { useT } from "../lib/i18n";
 import { detectOS, isMobileOS } from "../lib/platform";
 import { progBar } from "../lib/ascii";
 import Frame from "./Frame";
+import Slicer from "./Slicer";
 
 // Pull a human message out of a thrown api error ("429 {\"detail\":\"…\"}"). The
 // backend detail is English, so for the guard cases we show localized copy; other
@@ -33,10 +34,13 @@ export default function Start() {
   const [os, setOs] = useState<OS>(detectedOS === "android" ? "android" : "iphone");
   const [mode, setMode] = useState<ReadMode>("fast");
   const [file, setFile] = useState<File | null>(null);
+  const [oversize, setOversize] = useState<File | null>(null); // over-cap zip → local slicer
+  const [sliceRange, setSliceRange] = useState<string>("");    // honest provenance of a slice
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [hosted, setHosted] = useState(false);
+  const [capMB, setCapMB] = useState(0);
   const [agreed, setAgreed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -44,9 +48,28 @@ export default function Start() {
   const { t, tList, lang } = useT();
 
   // Consent gate only matters on the hosted exhibit (you process others' uploads).
+  // max_upload_mb powers the over-cap detection BEFORE any byte is sent.
   useEffect(() => {
-    getConfig().then((c) => setHosted(c.hosted)).catch(() => undefined);
+    getConfig()
+      .then((c) => {
+        setHosted(c.hosted);
+        setCapMB(c.max_upload_mb ?? 0);
+      })
+      .catch(() => undefined);
   }, []);
+
+  function pickFile(f: File | null) {
+    setErr(null);
+    setSliceRange("");
+    if (f && capMB && f.size > capMB * 1024 * 1024) {
+      // Too big to upload — offer to cut a date window LOCALLY instead of a 413.
+      setFile(null);
+      setOversize(f);
+      return;
+    }
+    setOversize(null);
+    setFile(f);
+  }
 
   // Abort an in-flight upload if the user navigates away mid-transfer.
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -64,6 +87,7 @@ export default function Start() {
       const { job_id } = await uploadChatChunked(file, platform, lang, mode, {
         signal: abortRef.current.signal,
         onProgress: (received, total) => setPct(total ? Math.round((received / total) * 100) : 0),
+        sliceRange: sliceRange || undefined,
       });
       nav(`/job/${job_id}`);
     } catch (e) {
@@ -186,11 +210,27 @@ export default function Start() {
             type="file"
             accept=".zip"
             style={{ display: "none" }}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
           />
+          {oversize && platform && (
+            <Slicer
+              file={oversize}
+              source={platform}
+              capMB={capMB}
+              onReady={(sliced, range) => {
+                setOversize(null);
+                setSliceRange(range);
+                setFile(sliced);
+              }}
+              onCancel={() => {
+                setOversize(null);
+                if (inputRef.current) inputRef.current.value = "";
+              }}
+            />
+          )}
           <div className="row">
             <button type="button" className="opt" onClick={() => inputRef.current?.click()}>
-              [ {file ? file.name.slice(0, 28) : t("start.chooseZip")} ]
+              [ {file ? (sliceRange ? `${t("slice.slicedName")} ${sliceRange}` : file.name.slice(0, 28)) : t("start.chooseZip")} ]
             </button>
             <button
               type="submit"

@@ -59,10 +59,13 @@ def api(base, path, data=None, method=None, ctype=None):
         return json.loads(body) if body.strip().startswith((b"{", b"[")) else body.decode()
 
 
+SLICE_RANGE = "2024-03-12 → 2024-03-15"   # provenance the slicer would send
+
+
 def upload(base, blob, source="whatsapp", lang="en", mode=None):
     boundary = uuid.uuid4().hex
     parts = []
-    fields = {"source": source, "lang": lang}
+    fields = {"source": source, "lang": lang, "slice_range": SLICE_RANGE}
     if mode:
         fields["mode"] = mode
     for k, v in fields.items():
@@ -140,6 +143,8 @@ def main():
 
     ret = api(a.base, f"/api/jobs/{jid}/retained")
     check("retained readout", isinstance(ret, dict) and "read" in ret, json.dumps(ret))
+    check("slice_range provenance persisted", res.get("slice_range") == SLICE_RANGE,
+          f"{res.get('slice_range')!r}")
 
     if res.get("mode") or a.mode:
         want_mode = a.mode or "fast"

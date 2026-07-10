@@ -189,6 +189,10 @@ export default function Result() {
           </p>
         ) : null}
 
+        {res.slice_range ? (
+          <p className="prov">{t("result.sliceProv", { range: res.slice_range })}</p>
+        ) : null}
+
         <div className="prov">
           {res.route
             ? t("result.readByRoute", { model: res.model || t("result.theModel"), route: res.route })

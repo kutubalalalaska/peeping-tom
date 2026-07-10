@@ -118,7 +118,8 @@ def get_config():
         routes.append({**r, "auth_ok": a["ok"], "auth_detail": a["detail"]} if a else r)
     return {"hosted": settings.hosted, "frontier_ready": settings.frontier_ready(),
             "routes": routes, "default_route": settings.default_route_id(),
-            "read_ttl_seconds": settings.read_ttl_seconds}
+            "read_ttl_seconds": settings.read_ttl_seconds,
+            "max_upload_mb": settings.max_upload_mb}
 
 
 @app.get("/api/quota")
@@ -136,7 +137,7 @@ def quota(request: Request):
 @app.post("/api/upload")
 async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
                  source: str = Form("whatsapp"), lang: str = Form("en"),
-                 mode: str = Form("fast")):
+                 mode: str = Form("fast"), slice_range: str = Form("")):
     # Abuse moat (hosted tier only): cap reads per cookie-session and per IP over a
     # rolling window. No login, no PII — just enough to stop scraping + runaway spend.
     if settings.hosted:
@@ -150,8 +151,11 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
         jid = jobs.create(source=source)
     # The chosen UI language sets the read's OUTPUT language (whitelisted in
     # protocol.lang_directive). `mode` picks the read pipeline (fast | deep).
+    # `slice_range` is honest provenance from the client-side slicer: the date
+    # window the user cut a too-big export down to (surfaced on the result).
     jobs.set_status(jid, lang=(lang or "en").split("-")[0].lower()[:5],
-                    mode=mode if mode in MODES else "fast")
+                    mode=mode if mode in MODES else "fast",
+                    slice_range=(slice_range.strip()[:64] or None))
     zp = jobs.path(jid, "upload.zip")
     # Stream the upload to disk in chunks — a multi-GB export would otherwise load
     # whole into RAM via file.read() and risk OOM on a small Docker VM.

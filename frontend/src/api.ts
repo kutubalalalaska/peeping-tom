@@ -36,6 +36,7 @@ export const getUploadOffset = async (jid: string) =>
 export interface ChunkedOpts {
   onProgress?: (received: number, total: number) => void;
   signal?: AbortSignal;
+  sliceRange?: string;   // provenance from the local slicer ("2023-03-01 → 2025-07-01")
 }
 
 export async function uploadChatChunked(
@@ -45,11 +46,12 @@ export async function uploadChatChunked(
   mode: string,
   opts: ChunkedOpts = {}
 ): Promise<{ job_id: string }> {
-  const { onProgress, signal } = opts;
+  const { onProgress, signal, sliceRange } = opts;
   const init = await asJson<{ job_id: string; chunk_size: number; max_mb: number }>(
     await fetch("/api/upload/init", {
       method: "POST",
-      body: fdOf({ source, lang, mode, size: file.size, name: file.name }),
+      body: fdOf({ source, lang, mode, size: file.size, name: file.name,
+                   ...(sliceRange ? { slice_range: sliceRange } : {}) }),
       signal,
     })
   );
