@@ -38,8 +38,10 @@ const CITE_RUN = /((?:\s*\[#\s*\d+(?:\s*,\s*#?\s*\d+)*\s*\])+)/g;
 const isCite = (tok: string) => /\[#\s*\d+/.test(tok);
 const idsIn = (tok: string) => [...new Set((tok.match(/\d+/g) || []).map(Number))];
 
-// The read: flowing prose; citation runs render as compact clickable chips that
-// open the context drawer. `##` lines become a subheading.
+// The read: flowing prose; citation runs render as compact clickable chips
+// INLINE, inside their sentence — each block stays ONE <p> (splitting a
+// paragraph into several <p>s stranded every chip on its own line). `##` lines
+// become a subheading.
 function renderRead(
   text: string,
   msgs: Record<number, ReceiptMessage>,
@@ -55,23 +57,25 @@ function renderRead(
       out.push(<h2 className="subhead" key={"h" + bi}>{head[1]}</h2>);
       return;
     }
+    const parts: ReactNode[] = [];
     b.split(CITE_RUN).forEach((tok, ti) => {
       if (isCite(tok)) {
         const resolvable = idsIn(tok).filter((id) => msgs[id]);
-        if (resolvable.length === 0) return;
-        out.push(<CiteChips key={"c" + bi + "_" + ti} ids={resolvable} onOpen={onOpen} />);
-      } else {
-        const p = tok.trim();
-        if (p && !PUNCT_ONLY.test(p)) {
-          out.push(
-            <p key={"p" + bi + "_" + ti} className={firstProse ? "lede" : ""}>
-              {p}
-            </p>
-          );
-          firstProse = false;
+        if (resolvable.length) {
+          parts.push(<CiteChips key={"c" + ti} ids={resolvable} onOpen={onOpen} />);
         }
+      } else if (tok && !PUNCT_ONLY.test(tok)) {
+        parts.push(<span key={"t" + ti}>{tok}</span>);
       }
     });
+    if (parts.length) {
+      out.push(
+        <p key={"p" + bi} className={firstProse ? "lede" : ""}>
+          {parts}
+        </p>
+      );
+      firstProse = false;
+    }
   });
   return out;
 }

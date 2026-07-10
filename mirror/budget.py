@@ -70,7 +70,7 @@ def plan(messages, media: dict) -> dict:
     cpt = _CPT.get(script, 3.0)
     chunks, start, acc = [], 0, 0
     for i, m in enumerate(messages):
-        t = int(len(T._body_of(m, media)) / cpt) + 6      # +overhead for #id/time/sender
+        t = int(len(T._body_of(m, media)) / cpt) + 9      # +overhead for #id/time/first-name sender
         if acc and acc + t > budget:
             chunks.append((start, i)); start, acc = i, 0
         acc += t

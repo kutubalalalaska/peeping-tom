@@ -77,13 +77,26 @@ def assemble(messages, media: dict) -> str:
     return "\n".join(lines)
 
 
-def _sender_token(i: int) -> str:
-    """0->A, 1->B, … 25->Z, 26->AA … (bijective base-26). Stable, short sender tags."""
-    s, i = "", i + 1
-    while i:
-        i, r = divmod(i - 1, 26)
-        s = chr(65 + r) + s
-    return s
+def _sender_tokens(order: list) -> dict:
+    """Short but REAL sender tags: the first name, extended just enough to stay
+    unique (surname initials, then the full name as a last resort). Single-letter
+    A/B tokens saved a little more, but cost attribution accuracy — the model
+    demonstrably mixed the letters up across a long read. A first name is
+    self-evident on every line; no legend lookup to fumble."""
+    toks, seen = {}, set()
+    for name in order:
+        words = name.split()
+        base = words[0] if words else name
+        cand = base
+        for extra in range(1, len(words)):
+            if cand.lower() not in seen:
+                break
+            cand = f"{base} {'.'.join(w[0] for w in words[1:extra + 1])}."
+        if cand.lower() in seen:
+            cand = name if name.lower() not in seen else f"{base}{len(seen)}"
+        seen.add(cand.lower())
+        toks[name] = cand
+    return toks
 
 
 def _body_of(m, media: dict) -> str:
@@ -103,12 +116,13 @@ def assemble_compact(messages, media: dict):
     for m in messages:
         if m.sender not in order:
             order.append(m.sender)
-    tok = {name: _sender_token(i) for i, name in enumerate(order)}
+    tok = _sender_tokens(order)
     legend = {tok[name]: name for name in order}
 
-    leg = ", ".join(f"{t}={n}" for t, n in legend.items())
-    out = ["FORMAT: lines are `#id HH:MM X: text`, grouped under `== YYYY-MM-DD ==` day "
-           f"headers. Senders: {leg}. Cite any message by its #id, written [#id]."]
+    shortened = ", ".join(f"{t} = {n}" for t, n in legend.items() if t != n)
+    leg = f" Senders shortened to first names: {shortened}." if shortened else ""
+    out = ["FORMAT: lines are `#id HH:MM sender: text`, grouped under `== YYYY-MM-DD ==` day "
+           f"headers.{leg} Cite any message by its #id, written [#id]."]
     cur_day = None
     for m in messages:
         ts = m.ts or ""

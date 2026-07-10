@@ -316,12 +316,13 @@ button { font: inherit; cursor: pointer; }
   .foot { font-size: 11px; }
 }
 
-/* ---- citation chips (long citation runs) ---- */
+/* ---- citation chips, INLINE with the sentence that cites them ---- */
+.cites { white-space: normal; }
 .cite {
-  display: inline-block; font: inherit; font-size: 12px; line-height: 1.4;
+  display: inline-block; font: inherit; font-size: 11.5px; line-height: 1.35;
   background: none; border: 1px solid var(--placeholder); border-radius: 10px;
-  color: var(--secondary); padding: 0 8px; margin: 0 4px 4px 0; cursor: pointer;
-  letter-spacing: .02em; vertical-align: baseline;
+  color: var(--secondary); padding: 0 7px; margin: 0 3px 2px 2px; cursor: pointer;
+  letter-spacing: .02em; vertical-align: 1px;
 }
 .cite:hover { border-color: var(--ink); color: var(--ink); }
 
