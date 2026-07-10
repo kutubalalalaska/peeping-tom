@@ -32,6 +32,14 @@ function CiteChips({ ids, onOpen }: { ids: number[]; onOpen: (id: number) => voi
 }
 
 const PUNCT_ONLY = /^[.,;:!?…—\-\s]+$/;
+
+// Minimal inline markdown: the read bolds its pattern statements (**…**) —
+// render them as <strong> instead of literal asterisks. Nothing else is parsed.
+function withBold(text: string, keyBase: string): ReactNode[] {
+  return text.split(/\*\*([^*]+)\*\*/g).map((seg, i) =>
+    i % 2 ? <strong key={keyBase + "_b" + i}>{seg}</strong> : seg
+  );
+}
 // A citation run: one or more [#id] brackets, back to back, tolerating multi-id /
 // comma forms. Captured so split() keeps it as its own token.
 const CITE_RUN = /((?:\s*\[#\s*\d+(?:\s*,\s*#?\s*\d+)*\s*\])+)/g;
@@ -48,12 +56,17 @@ function renderRead(
   onOpen: (id: number) => void
 ): ReactNode[] {
   const out: ReactNode[] = [];
-  let firstProse = true;
+  // The read's deliberate shape (soul.md): the DEFINING PHRASE (one sentence),
+  // then the SUMMARY paragraph, both before the first `##` section — styled as
+  // .lede and .summary respectively.
+  let leadIndex = 0;
+  let sawHeading = false;
   text.split(/\n\n+/).forEach((block, bi) => {
     const b = block.trim();
     if (!b) return;
     const head = b.match(/^#{2,}\s+(.*\S)\s*$/);
     if (head) {
+      sawHeading = true;
       out.push(<h2 className="subhead" key={"h" + bi}>{head[1]}</h2>);
       return;
     }
@@ -65,16 +78,18 @@ function renderRead(
           parts.push(<CiteChips key={"c" + ti} ids={resolvable} onOpen={onOpen} />);
         }
       } else if (tok && !PUNCT_ONLY.test(tok)) {
-        parts.push(<span key={"t" + ti}>{tok}</span>);
+        parts.push(<span key={"t" + ti}>{withBold(tok, "t" + bi + "_" + ti)}</span>);
       }
     });
     if (parts.length) {
+      const cls = !sawHeading && leadIndex === 0 ? "lede"
+        : !sawHeading && leadIndex === 1 ? "summary" : "";
       out.push(
-        <p key={"p" + bi} className={firstProse ? "lede" : ""}>
+        <p key={"p" + bi} className={cls}>
           {parts}
         </p>
       );
-      firstProse = false;
+      leadIndex++;
     }
   });
   return out;

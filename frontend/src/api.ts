@@ -33,10 +33,17 @@ function fdOf(fields: Record<string, string | number>): FormData {
 export const getUploadOffset = async (jid: string) =>
   (await asJson<{ received: number; size: number }>(await fetch(`/api/upload/${jid}/offset`))).received;
 
+export interface SliceMetaFields {
+  range: string;   // the kept window's dates
+  before: number;  // messages before the window (not uploaded)
+  after: number;   // messages after it
+  full: string;    // the original corpus's full span
+}
+
 export interface ChunkedOpts {
   onProgress?: (received: number, total: number) => void;
   signal?: AbortSignal;
-  sliceRange?: string;   // provenance from the local slicer ("2023-03-01 → 2025-07-01")
+  sliceMeta?: SliceMetaFields;   // provenance from the local slicer
 }
 
 export async function uploadChatChunked(
@@ -46,12 +53,13 @@ export async function uploadChatChunked(
   mode: string,
   opts: ChunkedOpts = {}
 ): Promise<{ job_id: string }> {
-  const { onProgress, signal, sliceRange } = opts;
+  const { onProgress, signal, sliceMeta } = opts;
   const init = await asJson<{ job_id: string; chunk_size: number; max_mb: number }>(
     await fetch("/api/upload/init", {
       method: "POST",
       body: fdOf({ source, lang, mode, size: file.size, name: file.name,
-                   ...(sliceRange ? { slice_range: sliceRange } : {}) }),
+                   ...(sliceMeta ? { slice_range: sliceMeta.range, slice_before: sliceMeta.before,
+                                     slice_after: sliceMeta.after, slice_full: sliceMeta.full } : {}) }),
       signal,
     })
   );

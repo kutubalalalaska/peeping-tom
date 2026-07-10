@@ -109,7 +109,7 @@ const en = {
   "slice.failed": "couldn't read this zip here — try a smaller export.",
   "slice.slicedName": "sliced:",
   "result.sliceProv":
-    "this read covers {range} — a slice you cut locally from a larger export; nothing outside it was uploaded.",
+    "this read covers {range} — a slice you cut locally from a larger export",
   "insp.step3parse": "step 3/4 · parse",
   "insp.step4": "step 4/4 · the read",
   "insp.errorStep": "error",
@@ -157,17 +157,17 @@ const en = {
   "result.deepProvN":
     "the model asked for a closer look at {n} photos, then re-read with them in view.",
   "result.readByRoute":
-    "read by {model} · via the {route} route — only the text transcript crossed.",
+    "read by {model} · via the {route} route",
   "result.readByNoRoute":
-    "read by {model} — only the text transcript crossed.",
+    "read by {model}",
   "result.theModel": "the model",
   "result.provoke":
     "this is how a frontier ai model profiled you — for good, or for bad.",
   "result.viewText": "view the exact text that was sent →",
-  "result.heldNow": "held now:",
-  "result.heldRawMedia": "raw media",
-  "result.heldTranscript": "transcript",
-  "result.heldRead": "the read",
+  "result.heldNow": "",
+  "result.heldRawMedia": "",
+  "result.heldTranscript": "",
+  "result.heldRead": "",
   "result.heldNone": "—",
   "result.nukeBtn": "nuke all my data",
   "result.nukeSub":

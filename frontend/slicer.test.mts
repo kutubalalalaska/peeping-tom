@@ -64,7 +64,10 @@ async function testWhatsApp() {
   const [f3, t3] = planWindow(model, budget, "middle");
   check("middle plan fits", fitsBudget(model, f3, t3, budget) && f3 > 0 && t3 < 60, `[${f3},${t3})`);
 
-  const { file: sliced, range } = await buildSlice(model, f1, t1);
+  const { file: sliced, meta } = await buildSlice(model, f1, t1);
+  const range = meta.range;
+  check("meta counts", meta.before === f1 && meta.after === 0 && meta.full.includes("→"),
+        JSON.stringify(meta));
   check("slice under cap", sliced.size <= budget.bytes + MB, `${(sliced.size / MB).toFixed(1)}MB`);
   check("range label", /^\d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}$/.test(range), range);
 
@@ -108,7 +111,7 @@ async function testTelegram() {
   const [f, t] = planWindow(model, budget, "tail");
   check("tail plan fits", fitsBudget(model, f, t, budget) && t === 40 && f > 0, `[${f},${t})`);
 
-  const { file: sliced } = await buildSlice(model, f, t);
+  const { file: sliced } = await buildSlice(model, f, t).then((r) => ({ file: r.file }));
   check("slice under cap", sliced.size <= budget.bytes + MB, `${(sliced.size / MB).toFixed(1)}MB`);
   const rd = new ZipReader(new BlobReader(sliced));
   const entries = await rd.getEntries();
@@ -131,7 +134,8 @@ async function testReal(path: string, capMB: number) {
   const [f, t] = planWindow(model, budget, "tail");
   console.log(`  tail window [${f},${t}) = ${rangeLabel(model, f, t)} ≈ ${(rangeBytes(model, f, t) / MB).toFixed(0)}MB / ~${Math.round(rangeTokens(model, f, t) / 1000)}k tok`);
   check("real: plan fits", fitsBudget(model, f, t, budget) && t === model.msgs.length);
-  const { file: sliced, range } = await buildSlice(model, f, t);
+  const { file: sliced, meta } = await buildSlice(model, f, t);
+  const range = meta.range;
   check("real: slice under cap", sliced.size <= capMB * MB, `${(sliced.size / MB).toFixed(0)}MB`);
   writeFileSync("/tmp/sliced-export.zip", Buffer.from(await sliced.arrayBuffer()));
   console.log(`  wrote /tmp/sliced-export.zip (${(sliced.size / MB).toFixed(0)}MB, range ${range})`);

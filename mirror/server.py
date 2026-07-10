@@ -137,7 +137,9 @@ def quota(request: Request):
 @app.post("/api/upload")
 async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
                  source: str = Form("whatsapp"), lang: str = Form("en"),
-                 mode: str = Form("fast"), slice_range: str = Form("")):
+                 mode: str = Form("fast"), slice_range: str = Form(""),
+                 slice_before: int = Form(0), slice_after: int = Form(0),
+                 slice_full: str = Form("")):
     # Abuse moat (hosted tier only): cap reads per cookie-session and per IP over a
     # rolling window. No login, no PII — just enough to stop scraping + runaway spend.
     if settings.hosted:
@@ -155,7 +157,10 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
     # window the user cut a too-big export down to (surfaced on the result).
     jobs.set_status(jid, lang=(lang or "en").split("-")[0].lower()[:5],
                     mode=mode if mode in MODES else "fast",
-                    slice_range=(slice_range.strip()[:64] or None))
+                    slice_range=(slice_range.strip()[:64] or None),
+                    slice_before=max(0, int(slice_before or 0)),
+                    slice_after=max(0, int(slice_after or 0)),
+                    slice_full=(slice_full.strip()[:64] or None))
     zp = jobs.path(jid, "upload.zip")
     # Stream the upload to disk in chunks — a multi-GB export would otherwise load
     # whole into RAM via file.read() and risk OOM on a small Docker VM.

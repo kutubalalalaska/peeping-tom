@@ -5,7 +5,7 @@ import { useT } from "../lib/i18n";
 import { detectOS, isMobileOS } from "../lib/platform";
 import { progBar } from "../lib/ascii";
 import { fmtEta } from "../lib/fmt";
-import { ONE_PASS_TOKENS, openExport, rangeTokens } from "../lib/slicer";
+import { ONE_PASS_TOKENS, openExport, rangeTokens, type SliceMeta } from "../lib/slicer";
 import Frame from "./Frame";
 import Slicer from "./Slicer";
 
@@ -36,8 +36,8 @@ export default function Start() {
   const [os, setOs] = useState<OS>(detectedOS === "android" ? "android" : "iphone");
   const [mode, setMode] = useState<ReadMode>("fast");
   const [file, setFile] = useState<File | null>(null);
-  const [oversize, setOversize] = useState<File | null>(null); // over-cap zip → local slicer
-  const [sliceRange, setSliceRange] = useState<string>("");    // honest provenance of a slice
+  const [oversize, setOversize] = useState<File | null>(null);      // over-cap zip → local slicer
+  const [sliceMeta, setSliceMeta] = useState<SliceMeta | null>(null); // honest provenance of a slice
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
   const [upEta, setUpEta] = useState<number | null>(null);
@@ -69,7 +69,7 @@ export default function Start() {
 
   async function pickFile(f: File | null) {
     setErr(null);
-    setSliceRange("");
+    setSliceMeta(null);
     if (!f) {
       setOversize(null);
       setFile(null);
@@ -155,7 +155,7 @@ export default function Start() {
             ? (total - received) / (gained / elapsed)
             : null);
         },
-        sliceRange: sliceRange || undefined,
+        sliceMeta: sliceMeta ?? undefined,
       });
       busyRef.current = false;
       nav(`/job/${job_id}`);
@@ -287,9 +287,9 @@ export default function Start() {
               file={oversize}
               source={platform}
               capMB={capMB}
-              onReady={(sliced, range) => {
+              onReady={(sliced, meta) => {
                 setOversize(null);
-                setSliceRange(range);
+                setSliceMeta(meta);
                 setFile(sliced);
               }}
               onCancel={() => {
@@ -300,7 +300,7 @@ export default function Start() {
           )}
           <div className="row">
             <button type="button" className="opt" onClick={() => inputRef.current?.click()}>
-              [ {file ? (sliceRange ? `${t("slice.slicedName")} ${sliceRange}` : file.name.slice(0, 28)) : t("start.chooseZip")} ]
+              [ {file ? (sliceMeta ? `${t("slice.slicedName")} ${sliceMeta.range}` : file.name.slice(0, 28)) : t("start.chooseZip")} ]
             </button>
             <button
               type="submit"

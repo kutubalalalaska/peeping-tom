@@ -294,12 +294,19 @@ export function rangeLabel(model: ExportModel, from: number, to: number): string
   return `${d(model.msgs[from].date)} → ${d(model.msgs[to - 1].date)}`;
 }
 
+export interface SliceMeta {
+  range: string;    // the kept window's dates ("2023-03-01 → 2025-07-01")
+  before: number;   // messages that exist BEFORE the window (not included)
+  after: number;    // messages that exist AFTER it
+  full: string;     // the original corpus's full date span
+}
+
 export async function buildSlice(
   model: ExportModel,
   from: number,
   to: number,
   onProgress?: (done: number, total: number) => void
-): Promise<{ file: File; range: string }> {
+): Promise<{ file: File; meta: SliceMeta }> {
   // level 0 (store): media is already compressed; re-deflating GBs would only
   // burn CPU. The size estimate above assumes store, so it stays honest.
   const writer = new ZipWriter(new BlobWriter("application/zip"), { level: 0 });
@@ -333,6 +340,11 @@ export async function buildSlice(
     onProgress?.(++done, names.length);
   }
   const blob = await writer.close();
-  const range = rangeLabel(model, from, to);
-  return { file: new File([blob], "sliced-export.zip", { type: "application/zip" }), range };
+  const meta: SliceMeta = {
+    range: rangeLabel(model, from, to),
+    before: from,
+    after: model.msgs.length - to,
+    full: rangeLabel(model, 0, model.msgs.length),
+  };
+  return { file: new File([blob], "sliced-export.zip", { type: "application/zip" }), meta };
 }

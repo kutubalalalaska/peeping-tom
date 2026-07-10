@@ -177,9 +177,10 @@ button { font: inherit; cursor: pointer; }
 /* deep mode: the background decode readout under the main bar */
 .bgbar { font-size: 11.5px; color: var(--muted); letter-spacing: .03em; margin-top: 8px; font-variant-numeric: tabular-nums; }
 
-/* ---- the read ---- */
+/* ---- the read (soul.md's shape: defining phrase → summary → sections) ---- */
 .read p { font-size: 16px; line-height: 1.85; margin: 22px 0 0; }
 .read .lede { font-size: clamp(19px, 2.6vw, 24px); font-weight: 500; line-height: 1.25; margin-top: 0; }
+.read .summary { font-size: 17px; line-height: 1.7; color: var(--secondary); margin-top: 16px; }
 .read .subhead { font-size: 18px; font-weight: 600; color: var(--ink); margin: 34px 0 4px; letter-spacing: -.01em; }
 
 /* cited messages, rendered inline as chat bubbles — the one styled element the

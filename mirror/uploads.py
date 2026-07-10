@@ -52,7 +52,9 @@ def _received(jid: str) -> int:
 @router.post("/api/upload/init")
 async def upload_init(request: Request, source: str = Form("whatsapp"),
                       lang: str = Form("en"), size: int = Form(0), name: str = Form(""),
-                      mode: str = Form("fast"), slice_range: str = Form("")):
+                      mode: str = Form("fast"), slice_range: str = Form(""),
+                      slice_before: int = Form(0), slice_after: int = Form(0),
+                      slice_full: str = Form("")):
     """Begin a resumable upload: apply the hosted rate cap + a total-size guard up
     front (an over-cap file is rejected before a single byte is sent), create the job,
     and return its id + the chunk size to use."""
@@ -71,6 +73,9 @@ async def upload_init(request: Request, source: str = Form("whatsapp"),
                     lang=(lang or "en").split("-")[0].lower()[:5],
                     mode=mode if mode in MODES else "fast",
                     slice_range=(slice_range.strip()[:64] or None),
+                    slice_before=max(0, int(slice_before or 0)),
+                    slice_after=max(0, int(slice_after or 0)),
+                    slice_full=(slice_full.strip()[:64] or None),
                     upload_size=int(size or 0), upload_name=str(name or "")[:200])
     return {"job_id": jid, "chunk_size": 8 * 1024 * 1024, "max_mb": settings.max_upload_mb}
 

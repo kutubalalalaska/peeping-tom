@@ -11,6 +11,7 @@ import {
   rangeLabel,
   type ExportModel,
   type SliceBudget,
+  type SliceMeta,
 } from "../lib/slicer";
 
 const GB = 1024 * 1024 * 1024;
@@ -31,7 +32,7 @@ export default function Slicer({
   file: File;
   source: "whatsapp" | "telegram";
   capMB: number;
-  onReady: (sliced: File, range: string) => void;
+  onReady: (sliced: File, meta: SliceMeta) => void;
   onCancel: () => void;
 }) {
   const { t } = useT();
@@ -78,10 +79,10 @@ export default function Slicer({
     if (!model || !fits) return;
     setBuilding([0, 1]);
     try {
-      const { file: sliced, range: label } = await buildSlice(model, from, to, (d, tot) =>
+      const { file: sliced, meta } = await buildSlice(model, from, to, (d, tot) =>
         setBuilding([d, tot])
       );
-      onReady(sliced, label);
+      onReady(sliced, meta);
     } catch {
       setErr(t("slice.failed"));
       setBuilding(null);

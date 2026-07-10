@@ -99,6 +99,9 @@ def _run(job_id: str):
         "path_of": {f.name: f for f in files},
         "file_ids": _file_ids_map(msgs),
         "dropped": [0], "inspected": [],
+        # sample-awareness: when the upload is a slicer window, every read is told
+        # what lies outside it — so it never narrates the window as the whole arc
+        "note": protocol.slice_note(st),
     }
 
     plan = budget.plan(msgs, media)
@@ -153,7 +156,8 @@ def _mk_on_delta(job_id):
 def _stream_read(ctx, text, select_k, targets=protocol.DEFAULT_TARGETS):
     """One streamed full read → (body, requests)."""
     user = protocol.user_prompt(text, lang=ctx["lang"], select_k=select_k,
-                                notes=not settings.stream_reasoning, targets=targets)
+                                notes=not settings.stream_reasoning, targets=targets,
+                                context_note=ctx.get("note", ""))
     raw = provider.complete(protocol.SOUL, user, ctx["route"],
                             on_event=protocol.stream_router(_mk_on_delta(ctx["job_id"])),
                             mock_reply=lambda _u: protocol.mock_read(text, select_k))
@@ -490,7 +494,8 @@ def _deep_fold(ctx):
     jobs.path(job_id, "transcript.txt").write_text(text)
     jobs.set_status(job_id, phase="composing",
                     message="composing the final read on the fully-decoded chat…")
-    user = protocol.deep_final_prompt(text, draft, ctx["lang"], notes=not settings.stream_reasoning)
+    user = protocol.deep_final_prompt(text, draft, ctx["lang"], notes=not settings.stream_reasoning,
+                                      context_note=ctx.get("note", ""))
     raw = provider.complete(protocol.SOUL, user, ctx["route"],
                             on_event=protocol.stream_router(_mk_on_delta(job_id)),
                             mock_reply=lambda _u: protocol.mock_read(text))

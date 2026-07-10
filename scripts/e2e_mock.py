@@ -65,7 +65,8 @@ SLICE_RANGE = "2024-03-12 → 2024-03-15"   # provenance the slicer would send
 def upload(base, blob, source="whatsapp", lang="en", mode=None):
     boundary = uuid.uuid4().hex
     parts = []
-    fields = {"source": source, "lang": lang, "slice_range": SLICE_RANGE}
+    fields = {"source": source, "lang": lang, "slice_range": SLICE_RANGE,
+              "slice_before": "120", "slice_after": "40", "slice_full": "2021-01-01 → 2026-06-11"}
     if mode:
         fields["mode"] = mode
     for k, v in fields.items():
