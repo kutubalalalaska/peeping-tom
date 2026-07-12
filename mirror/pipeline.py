@@ -288,7 +288,7 @@ def _run_fast(ctx, plan):
     text = T.assemble_for_read(msgs, media, header=header)
     jobs.path(job_id, "transcript.txt").write_text(text)
     jobs.set_status(job_id, phase="reading",
-                    message="the frontier model is reading your chat (text first)…")
+                    message="the frontier model is reading your chat")
     k = mode.max_request_items if mode.request_rounds else 0
     final, requests = _stream_read(ctx, text, select_k=k, targets=protocol.UNDECODED_TARGETS)
 
@@ -555,6 +555,25 @@ def _deep_mapreduce(ctx, plan):
 
 def _persist(ctx, final):
     job_id, route = ctx["job_id"], ctx["route"]
+
+    # Structure gate (same philosophy as citation validation): lint the shape;
+    # on findings, ONE draft-only repair call — no transcript re-send, so it
+    # costs ~a cent and fires only when the model actually drifted.
+    findings = protocol.lint_read(final or "")
+    repaired = False
+    if findings and route.provider != "mock":
+        print(f"[read] structure lint: {findings} — one repair pass", flush=True)
+        jobs.set_status(job_id, message="tidying the read's structure…")
+        try:
+            raw = provider.complete(protocol.SOUL,
+                                    protocol.repair_prompt(final, findings, ctx["lang"]),
+                                    route)
+            body = protocol.parse(raw).body
+            if body.strip() and len(protocol.lint_read(body)) < len(findings):
+                final, repaired = body, True
+        except Exception as e:                      # keep the original read — never fail a job here
+            print(f"[read] structure repair failed (keeping original): {e}", flush=True)
+
     final, citations, dropped = protocol.validate_citations(final or "", len(ctx["msgs"]))
     dropped += ctx["dropped"][0]
     if dropped:
@@ -567,6 +586,8 @@ def _persist(ctx, final):
          "route": route.id, "model": route.model, "mode": ctx["mode_name"],
          "expires_at": expires_at, "inspected": ctx["inspected"],
          "deep_count": len(ctx["inspected"]),
+         # observability: how often GLM drifts structurally (like citations_dropped)
+         "structure_findings": findings, "structure_repaired": repaired,
          # honest provenance: the date window the user cut the export down to
          "slice_range": (jobs.get_status(job_id) or {}).get("slice_range")},
         ensure_ascii=False, indent=2))

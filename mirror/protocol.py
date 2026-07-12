@@ -117,6 +117,25 @@ DEEP_FINAL_USER = (
     "transcript. Output ONLY the analysis."
 )
 
+# Appended AFTER the transcript: long-context adherence decays with distance, and
+# on a big chat the soul (system prompt) sits ~200k tokens from the generation
+# point — the structure demonstrably drifts (chips-only arc sections, template
+# words as titles). Instructions at the END of the prompt are the ones models
+# actually follow — the MEDIA REQUESTS block lives there and never drifts.
+SHAPE_REMINDER = (
+    "\n\nREMINDER — the exact shape of your output (per your operating instructions):\n"
+    "1. First line: ONE defining sentence that captures the relationship whole. No heading.\n"
+    "2. A 2-3 sentence summary paragraph. No heading.\n"
+    "3. `## the patterns` — each pattern OPENS with its own plain-sentence statement "
+    "(never a template word like \"the pattern\" as a title), then receipts and how it plays out.\n"
+    "4. `## the arc` — ONE real prose paragraph on how the behaviour evolved. Never citations alone.\n"
+    "5. `## what i couldn't determine` — the honest limits.\n"
+    "6. `## footnotes` — optional; only if the corpus genuinely earns it.\n"
+    "Section titles are `##` headings in the output language. Every section must contain real "
+    "prose — a heading followed only by [#id] citations is a structural failure. No paragraph "
+    "may BEGIN with a citation; citations trail the claims they support."
+)
+
 # Prepended (streamed reads only) so the analysis screen can show the read FORMING.
 NOTES_INSTRUCTION = (
     "\n\nBEFORE the analysis, output 3-6 short working notes — each on its OWN line, "
@@ -148,7 +167,8 @@ def _ctx(note: str) -> str:
 
 def user_prompt(transcript: str, lang=None, select_k: int = 0, notes: bool = False,
                 targets: str = DEFAULT_TARGETS, context_note: str = "") -> str:
-    u = USER.format(transcript=transcript, context=_ctx(context_note)) + lang_directive(lang)
+    u = (USER.format(transcript=transcript, context=_ctx(context_note))
+         + lang_directive(lang) + SHAPE_REMINDER)
     if select_k:
         u += REQUEST_INSTRUCTION.format(k=select_k, targets=targets)
     if notes:
@@ -167,7 +187,7 @@ def era_prompt(transcript: str, part: int, total: int, select_k: int = 0,
 def synth_prompt(eras, lang=None) -> str:
     blocks = "\n\n".join(f"=== ERA {i + 1}/{len(eras)} · {lab} ===\n{txt}"
                          for i, (lab, txt) in enumerate(eras))
-    return SYNTH_USER.format(total=len(eras), eras=blocks) + lang_directive(lang)
+    return SYNTH_USER.format(total=len(eras), eras=blocks) + lang_directive(lang) + SHAPE_REMINDER
 
 
 def fold_prompt(draft: str, evidence: str, lang=None) -> str:
@@ -176,8 +196,9 @@ def fold_prompt(draft: str, evidence: str, lang=None) -> str:
 
 def deep_final_prompt(transcript: str, draft: str, lang=None, notes: bool = False,
                       context_note: str = "") -> str:
-    u = DEEP_FINAL_USER.format(transcript=transcript, draft=draft,
-                               context=_ctx(context_note)) + lang_directive(lang)
+    u = (DEEP_FINAL_USER.format(transcript=transcript, draft=draft,
+                                context=_ctx(context_note))
+         + lang_directive(lang) + SHAPE_REMINDER)
     if notes:
         u += NOTES_INSTRUCTION
     return u
@@ -348,6 +369,63 @@ def stream_router(on_delta):
     return on_event
 
 
+# --- structural lint + repair --------------------------------------------------------
+
+REPAIR_USER = (
+    "Below is an analysis you wrote. It violates its required structure. Rewrite it to "
+    "conform EXACTLY — fixing structure and flow ONLY: do not add, remove, weaken, or "
+    "change any claim, and keep every [#id] citation attached to the claim it supports. "
+    "If a section's prose is missing (e.g. a section that is only citations), write the "
+    "missing prose FROM the claims already present elsewhere in the analysis — never "
+    "invent new observations.\n\n"
+    "Problems found:\n{findings}\n"
+    "{shape}\n\n"
+    "--- ANALYSIS START ---\n{draft}\n--- ANALYSIS END ---\n\n"
+    "Output ONLY the corrected analysis."
+)
+
+_LINT_CITE_RUN = re.compile(r"\[\s*#\s*\d+(?:\s*[,;]\s*#?\s*\d+)*\s*\]")
+_LINT_HEAD = re.compile(r"^#{2,}\s+\S")
+
+
+def lint_read(text: str) -> list:
+    """Language-agnostic structural checks on a finished read. Returns human-
+    readable findings (empty = conforms). Mirrors SHAPE_REMINDER: a lede before
+    the first heading, enough sections, prose in every section (a chips-only
+    section is the known failure), no paragraph opening with bare citations."""
+    findings = []
+    blocks = [b.strip() for b in re.split(r"\n\n+", text or "") if b.strip()]
+    if not blocks:
+        return ["the read is empty"]
+    heads = [i for i, b in enumerate(blocks) if _LINT_HEAD.match(b)]
+    if not heads or heads[0] == 0:
+        findings.append("the read must open with a defining sentence and a short summary "
+                        "BEFORE the first `##` section heading")
+    if len(heads) < 3:
+        findings.append("expected at least three `##` sections (the patterns, the arc, "
+                        "what i couldn't determine)")
+    for idx, hi in enumerate(heads):
+        end = heads[idx + 1] if idx + 1 < len(heads) else len(blocks)
+        prose = " ".join(blocks[hi + 1:end])
+        residual = re.sub(r"[\s.,;:()\[\]—–\-*]+", "", _LINT_CITE_RUN.sub("", prose))
+        if len(residual) < 40:
+            title = blocks[hi].lstrip("#").strip()
+            findings.append(f"the section '{title}' contains no real prose — a section "
+                            "must never be citations alone")
+    for b in blocks:
+        if not _LINT_HEAD.match(b) and _LINT_CITE_RUN.match(b):
+            findings.append("a paragraph BEGINS with bare [#id] citations — every claim "
+                            "must open with its statement; citations trail it")
+            break
+    return findings
+
+
+def repair_prompt(draft: str, findings: list, lang=None) -> str:
+    listed = "\n".join(f"- {f}" for f in findings)
+    return (REPAIR_USER.format(findings=listed, shape=SHAPE_REMINDER.strip(), draft=draft)
+            + lang_directive(lang))
+
+
 # --- citation validation -----------------------------------------------------------
 
 # Bracketed citation run: the FIRST id must carry '#' (so [2024] etc. are never
@@ -407,7 +485,8 @@ def mock_read(transcript: str, select_k: int = 0) -> str:
         f"## the arc\n\n"
         f"The exchange warms early, and over time the initiating shifts to one side {d}.\n\n"
         f"## what i couldn't determine\n\n"
-        f"(mock read — set a real frontier route for the actual read.)\n\n"
+        f"(mock read — set a real frontier route for the actual read; nothing in this "
+        f"placeholder is a real observation about anyone.)\n\n"
         f"## footnotes\n\n"
         f"One of you answers hard questions with a sticker; the other always asks about sleep."
     )
