@@ -65,8 +65,19 @@ def _run(job_id: str):
     exp = jobs.path(job_id, "export")
     chat = ingest.find_export(exp, source)
     if not chat:
+        # Pointed guardrail: say WHAT the zip actually is, not just what's missing.
+        # A strict sniff for the other platform's marker catches the classic
+        # mis-pick (whatsapp zip uploaded with telegram selected, or vice versa).
+        other = "whatsapp" if source == "telegram" else "telegram"
+        other_marker = "_chat.txt" if source == "telegram" else "result.json"
         want = "result.json" if source == "telegram" else "_chat.txt"
-        jobs.set_status(job_id, state="error", message=f"no {want} found in the upload")
+        if next(exp.rglob(other_marker), None):
+            msg = (f"this looks like a {other} export, but {source} was selected — "
+                   f"go back and pick {other}")
+        else:
+            msg = (f"this doesn't look like a {source} export — no {want} inside the zip. "
+                   f"upload the .zip exactly as {source} made it")
+        jobs.set_status(job_id, state="error", message=msg)
         return
     msgs, predecoded = ingest.parse_export(chat, source)
     if not msgs:

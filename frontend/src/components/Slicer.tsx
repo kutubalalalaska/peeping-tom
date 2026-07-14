@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useT } from "../lib/i18n";
 import { progBar } from "../lib/ascii";
 import {
+  ExportFormatError,
   ONE_PASS_TOKENS,
   buildSlice,
   fitsBudget,
@@ -58,7 +59,15 @@ export default function Slicer({
         setModel(m);
         setRange(planWindow(m, budget, "tail"));   // most people want the latest part
       })
-      .catch(() => alive && setErr(t("slice.failed")));
+      .catch((ex) => {
+        if (!alive) return;
+        // Wrong-format zips get the pointed message; anything else the generic one.
+        setErr(ex instanceof ExportFormatError
+          ? (ex.found && ex.found !== source
+              ? t("start.errWrongPlatform", { found: ex.found, selected: source })
+              : t("start.errNotExport", { platform: source }))
+          : t("slice.failed"));
+      });
     return () => {
       alive = false;
     };

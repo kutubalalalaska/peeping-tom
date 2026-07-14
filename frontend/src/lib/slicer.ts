@@ -156,6 +156,18 @@ function parseWhatsApp(text: string, entryOfBase: Map<string, string>): { msgs: 
 
 // ---- open + parse -------------------------------------------------------------
 
+// The zip opened fine but doesn't hold the selected platform's export. `found`
+// names the platform whose marker file IS inside (a strict sniff: _chat.txt /
+// result.json only), so the UI can say "you picked X but this is a Y export".
+export class ExportFormatError extends Error {
+  found: "whatsapp" | "telegram" | null;
+  constructor(found: "whatsapp" | "telegram" | null) {
+    super("no chat file found in this zip");
+    this.name = "ExportFormatError";
+    this.found = found;
+  }
+}
+
 export async function openExport(file: File, source: "whatsapp" | "telegram"): Promise<ExportModel> {
   const reader = new ZipReader(new BlobReader(file));
   const entries = (await reader.getEntries()).filter(
@@ -173,7 +185,11 @@ export async function openExport(file: File, source: "whatsapp" | "telegram"): P
       ? entries.find((e) => e.filename.split("/").pop() === "result.json")
       : entries.find((e) => e.filename.split("/").pop() === "_chat.txt") ||
         entries.find((e) => e.filename.toLowerCase().endsWith(".txt"));
-  if (!chatEntry) throw new Error("no chat file found in this zip");
+  if (!chatEntry) {
+    const bases = new Set(entries.map((e) => e.filename.split("/").pop()));
+    throw new ExportFormatError(
+      bases.has("result.json") ? "telegram" : bases.has("_chat.txt") ? "whatsapp" : null);
+  }
   const text = await chatEntry.getData(new TextWriter());
 
   if (source === "telegram") {

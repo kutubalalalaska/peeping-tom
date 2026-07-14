@@ -5,7 +5,7 @@ import { useT } from "../lib/i18n";
 import { detectOS, isMobileOS } from "../lib/platform";
 import { progBar } from "../lib/ascii";
 import { fmtEta } from "../lib/fmt";
-import { ONE_PASS_TOKENS, openExport, rangeTokens, type SliceMeta } from "../lib/slicer";
+import { ExportFormatError, ONE_PASS_TOKENS, openExport, rangeTokens, type SliceMeta } from "../lib/slicer";
 import Frame from "./Frame";
 import Slicer from "./Slicer";
 
@@ -83,8 +83,18 @@ export default function Start() {
       try {
         const m = await openExport(f, platform);
         over = rangeTokens(m, 0, m.msgs.length) > ONE_PASS_TOKENS;
-      } catch {
-        // unreadable here — let the server's parser have its own try
+      } catch (ex) {
+        // A readable zip that just isn't this platform's export is rejected HERE,
+        // before a single byte uploads. Anything else stays fail-open — the
+        // server's parser gets its own try.
+        if (ex instanceof ExportFormatError) {
+          setErr(ex.found && ex.found !== platform
+            ? t("start.errWrongPlatform", { found: ex.found, selected: platform })
+            : t("start.errNotExport", { platform }));
+          setOversize(null);
+          setFile(null);
+          return;
+        }
       }
     }
     if (over) {
