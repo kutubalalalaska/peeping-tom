@@ -136,15 +136,25 @@ function parseWhatsApp(text: string, entryOfBase: Map<string, string>): { msgs: 
     const line = raw.replace(LRM, "").trim();
     const m = line.match(IOS_RE) || line.match(ANDROID_RE);
     const attach = [...line.matchAll(ATTACH_RE)].map((a) => a[1].trim());
+    let started = false;
     if (m) {
       const ts = parseTs(m[1].replace(LRM, "").trim(), dayFirst);
       if (ts !== null) {
         if (msgs.length) msgs[msgs.length - 1].lineEnd = i;
-        msgs.push({ date: ts, media: [], chars: 0, lineStart: i, lineEnd: lines.length });
+        // chars = message TEXT only: the raw "[ts] Sender: " prefix must NOT
+        // count — rangeTokens models the transcript's own #id/time/sender
+        // prefix with its flat per-message add, and counting the raw prefix
+        // here too double-charged ~9 tok/msg (short-message chats read ~1.5x
+        // their real size and tripped the one-pass gate).
+        const rest = m[2];
+        const cut = rest.indexOf(": ");
+        msgs.push({ date: ts, media: [], chars: cut >= 0 ? rest.length - cut - 2 : 0,
+                    lineStart: i, lineEnd: lines.length });
+        started = true;
       }
     }
     if (msgs.length) {
-      msgs[msgs.length - 1].chars += line.length;
+      if (!started) msgs[msgs.length - 1].chars += line.length;
       for (const a of attach) {
         const entry = entryOfBase.get(a.split("/").pop()!);
         if (entry) msgs[msgs.length - 1].media.push(entry);
@@ -211,8 +221,10 @@ export async function openExport(file: File, source: "whatsapp" | "telegram"): P
           : entryOfBase.get(ref.split("/").pop()!);
         if (hit) media.push(hit);
       }
+      // chars = message text only — the prefix is rangeTokens' flat add (same
+      // no-double-count rule as the WhatsApp parse above).
       const body = typeof r.text === "string" ? r.text : JSON.stringify(r.text ?? "");
-      msgs.push({ date: ts, media, chars: body.length + 24 });
+      msgs.push({ date: ts, media, chars: body.length });
       tgRows.push(row);
     }
     const cptTg = dominantCpt(msgs.map((_, i) => {
