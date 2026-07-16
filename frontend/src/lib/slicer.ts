@@ -269,49 +269,36 @@ export function fitsBudget(model: ExportModel, from: number, to: number, budget:
   return rangeBytes(model, from, to) <= budget.bytes && rangeTokens(model, from, to) <= budget.tokens;
 }
 
-export function planWindow(
+// One-slider planning: the window STARTS at `start` and greedily fills the
+// budget forward (spilling backward once it reaches the end of the chat, so
+// dragging to the far right converges on the exact tail window). Every slider
+// position therefore yields a full one-read window. `bound` names the budget
+// that stopped the window growing — the axis the UI should highlight; "all"
+// means the whole chat fit (can't happen once the slicer is showing).
+export function planFrom(
   model: ExportModel,
   budget: SliceBudget,
-  anchor: "head" | "tail" | "middle"
-): [number, number] {
-  // Greedy over BOTH axes: a message costs media bytes AND estimated tokens;
-  // the window grows while both budgets hold (then an exact check trims for
-  // dedup/overhead the running sums don't see).
+  start: number
+): { range: [number, number]; bound: "tokens" | "bytes" | "all" } {
   const bytes = msgBytes(model);
   const toks = msgTokens(model);
   const n = bytes.length;
-  if (!n) return [0, 0];
-  const fits = (f: number, t: number) => fitsBudget(model, f, t, budget);
-  const ok = (accB: number, accT: number) => accB <= budget.bytes && accT <= budget.tokens;
-  if (anchor === "tail") {
-    let from = n, accB = 0, accT = 0;
-    while (from > 0 && ok(accB + bytes[from - 1], accT + toks[from - 1])) {
-      accB += bytes[from - 1]; accT += toks[from - 1]; from--;
-    }
-    while (from < n && !fits(from, n)) from++;
-    return [from, n];
+  if (!n) return { range: [0, 0], bound: "all" };
+  let from = Math.max(0, Math.min(Math.floor(start), n - 1));
+  let to = from, accB = 0, accT = 0;
+  let bound: "tokens" | "bytes" | "all" = "all";
+  const grow = (i: number): boolean => {
+    if (accT + toks[i] > budget.tokens) { bound = "tokens"; return false; }
+    if (accB + bytes[i] > budget.bytes) { bound = "bytes"; return false; }
+    accB += bytes[i]; accT += toks[i]; return true;
+  };
+  while (to < n && grow(to)) to++;
+  while (to === n && from > 0 && grow(from - 1)) from--;
+  // exact check trims for dedup/overhead the running sums don't see
+  while (from < to && !fitsBudget(model, from, to, budget)) {
+    if (to < n) to--; else from++;
   }
-  if (anchor === "head") {
-    let to = 0, accB = 0, accT = 0;
-    while (to < n && ok(accB + bytes[to], accT + toks[to])) {
-      accB += bytes[to]; accT += toks[to]; to++;
-    }
-    while (to > 0 && !fits(0, to)) to--;
-    return [0, to];
-  }
-  // middle: expand symmetrically from the center
-  let lo = Math.floor(n / 2), hi = lo, accB = 0, accT = 0;
-  while (lo > 0 || hi < n) {
-    const canLo = lo > 0 && ok(accB + bytes[lo - 1], accT + toks[lo - 1]);
-    const canHi = hi < n && ok(accB + bytes[hi], accT + toks[hi]);
-    if (canLo && (!canHi || bytes[lo - 1] + toks[lo - 1] <= bytes[hi] + toks[hi])) {
-      lo--; accB += bytes[lo]; accT += toks[lo];
-    } else if (canHi) {
-      accB += bytes[hi]; accT += toks[hi]; hi++;
-    } else break;
-  }
-  while (lo < hi && !fits(lo, hi)) (hi - lo) % 2 ? hi-- : lo++;
-  return [lo, hi];
+  return { range: [from, to], bound };
 }
 
 // ---- rebuild ---------------------------------------------------------------------

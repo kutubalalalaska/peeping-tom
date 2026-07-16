@@ -56,6 +56,14 @@ export function progBar(pct: number, width = 28): string {
   return "[" + "█".repeat(f) + "░".repeat(width - f) + "] " + String(Math.round(p)).padStart(3, " ") + "%";
 }
 
+// Window-on-timeline band: the kept slice rendered as a lit segment of the
+// whole chat, so the slider's geometry is honest (used by the Slicer).
+export function spanBar(f0: number, f1: number, width = 44): string {
+  const a = Math.max(0, Math.min(width - 1, Math.round(f0 * width)));
+  const b = Math.max(a + 1, Math.min(width, Math.round(f1 * width)));
+  return "[" + "░".repeat(a) + "█".repeat(b - a) + "░".repeat(width - b) + "]";
+}
+
 // Indeterminate "working" bar: a lit window slides across, driven by the frame
 // counter. Used where there's no numeric progress (the read, the deep pass).
 export function scanBar(sf: number, width = 28, win = 5): string {

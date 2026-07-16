@@ -163,6 +163,10 @@ button { font: inherit; cursor: pointer; }
 .slicestat { font-size: 12.5px; color: var(--secondary); margin-top: 10px; font-variant-numeric: tabular-nums; }
 .fit-ok { color: var(--success); }
 .fit-no { color: var(--accent); }
+/* the kept window drawn on the whole chat's timeline */
+.spanbar { font-size: 11px; line-height: 1; color: var(--secondary); margin: 0 0 2px; overflow: hidden; }
+/* the budget axis that stopped the window growing — emphasis, not alarm */
+.lim { color: var(--ink); font-weight: 600; }
 
 /* mode toggle sub-line (Start) */
 .modesub { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.6; max-width: 560px; }

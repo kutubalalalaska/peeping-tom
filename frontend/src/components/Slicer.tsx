@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "../lib/i18n";
-import { progBar } from "../lib/ascii";
+import { progBar, spanBar } from "../lib/ascii";
 import {
   ExportFormatError,
   ONE_PASS_TOKENS,
   buildSlice,
   fitsBudget,
   openExport,
-  planWindow,
+  planFrom,
   rangeBytes,
   rangeLabel,
+  rangeTokens,
   type ExportModel,
   type SliceBudget,
   type SliceMeta,
@@ -40,6 +41,7 @@ export default function Slicer({
   const [model, setModel] = useState<ExportModel | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [range, setRange] = useState<[number, number]>([0, 0]);
+  const [bound, setBound] = useState<"tokens" | "bytes" | "all">("all");
   const [building, setBuilding] = useState<[number, number] | null>(null);
 
   // Two budgets a slice must fit: the upload cap's bytes (minus zip headroom)
@@ -50,6 +52,15 @@ export default function Slicer({
     [capMB]
   );
 
+  // The ONE slider: its value is the window's start; the window itself always
+  // fills the budget from there (planFrom), so dragging slides a full
+  // one-read window along the chat.
+  function apply(m: ExportModel, start: number) {
+    const p = planFrom(m, budget, start);
+    setRange(p.range);
+    setBound(p.bound);
+  }
+
   useEffect(() => {
     let alive = true;
     openExport(file, source)
@@ -57,7 +68,7 @@ export default function Slicer({
         if (!alive) return;
         if (!m.msgs.length) throw new Error("no dated messages found");
         setModel(m);
-        setRange(planWindow(m, budget, "tail"));   // most people want the latest part
+        apply(m, m.msgs.length);                   // most people want the latest part
       })
       .catch((ex) => {
         if (!alive) return;
@@ -76,6 +87,10 @@ export default function Slicer({
   const [from, to] = range;
   const est = useMemo(
     () => (model && to > from ? rangeBytes(model, from, to) : 0),
+    [model, from, to]
+  );
+  const estTok = useMemo(
+    () => (model && to > from ? rangeTokens(model, from, to) : 0),
     [model, from, to]
   );
   const fits = !!model && to > from && fitsBudget(model, from, to, budget);
@@ -142,46 +157,40 @@ export default function Slicer({
         {t("slice.pick")}
       </div>
       <div className="row">
-        <button type="button" className="opt" onClick={() => setRange(planWindow(model, budget, "tail"))}>
+        <button type="button" className="opt" onClick={() => apply(model, n)}>
           {t("slice.latest")}
         </button>
-        <button type="button" className="opt" onClick={() => setRange(planWindow(model, budget, "head"))}>
+        <button type="button" className="opt" onClick={() => apply(model, 0)}>
           {t("slice.earliest")}
         </button>
-        <button type="button" className="opt" onClick={() => setRange(planWindow(model, budget, "middle"))}>
+        <button type="button" className="opt" onClick={() => apply(model, Math.floor((n - (to - from)) / 2))}>
           {t("slice.middle")}
         </button>
       </div>
       <div className="slicers">
+        <pre className="spanbar">{spanBar(from / n, to / n)}</pre>
         <label>
-          <span>{t("slice.from")}</span>
+          <span>{t("slice.window")}</span>
           <input
             type="range"
             min={0}
-            max={Math.max(0, to - 1)}
-            step={step}
-            value={from}
-            onChange={(e) => setRange([Math.min(+e.target.value, to - 1), to])}
-          />
-        </label>
-        <label>
-          <span>{t("slice.to")}</span>
-          <input
-            type="range"
-            min={Math.min(from + 1, n)}
             max={n}
             step={step}
-            value={to}
-            onChange={(e) => setRange([from, Math.max(+e.target.value, from + 1)])}
+            value={from}
+            onChange={(e) => apply(model, +e.target.value)}
           />
         </label>
       </div>
       <div className="slicestat">
-        {t("slice.selected", {
-          n: to - from,
-          range: rangeLabel(model, from, to),
-          size: fmtSize(est),
-        })}{" "}
+        {t("slice.selected", { n: to - from, range: rangeLabel(model, from, to) })}
+        {" · "}
+        <span className={bound === "tokens" ? "lim" : undefined}>
+          ≈ {Math.round(estTok / 1000)}k / {Math.round(budget.tokens / 1000)}k {t("slice.unitTokens")}
+        </span>
+        {" · "}
+        <span className={bound === "bytes" ? "lim" : undefined}>
+          {fmtSize(est)} / {fmtSize(budget.bytes)}
+        </span>{" "}
         <span className={fits ? "fit-ok" : "fit-no"}>
           {fits ? t("slice.fits") : t("slice.over")}
         </span>
