@@ -32,6 +32,11 @@ const en = {
   "landing.quotaLeft": "{remaining} of {limit} reads left today",
   "landing.quotaNone":
     "you've used all {limit} reads for today — they reset within a day",
+  "landing.noCredits": "we are out of free trials for now.",
+  "landing.noCreditsRun": "download",
+  "landing.noCreditsMid": " the code to run it yourself, or ",
+  "landing.noCreditsSub": "subscribe",
+  "landing.noCreditsTail": " to support us.",
   "landing.source": "Source",
   "landing.dataCycle": "Data cycle",
 
@@ -256,6 +261,11 @@ const ru: Dict = {
   "landing.quotaLeft": "осталось {remaining} из {limit} разборов на сегодня",
   "landing.quotaNone":
     "вы использовали все {limit} разборов на сегодня — они обновятся в течение суток",
+  "landing.noCredits": "бесплатные разборы пока закончились.",
+  "landing.noCreditsRun": "скачайте",
+  "landing.noCreditsMid": " код и запустите у себя, или ",
+  "landing.noCreditsSub": "подпишитесь",
+  "landing.noCreditsTail": ", чтобы поддержать нас.",
   "landing.source": "Исходный код",
   "landing.dataCycle": "Цикл данных",
 
@@ -478,6 +488,11 @@ const it: Dict = {
   "landing.quotaLeft": "{remaining} di {limit} letture rimaste oggi",
   "landing.quotaNone":
     "hai usato tutte le {limit} letture di oggi — si azzerano entro un giorno",
+  "landing.noCredits": "le prove gratuite sono finite per ora.",
+  "landing.noCreditsRun": "scarica",
+  "landing.noCreditsMid": " il codice ed eseguilo da te, oppure ",
+  "landing.noCreditsSub": "iscriviti",
+  "landing.noCreditsTail": " per sostenerci.",
   "landing.source": "Sorgente",
   "landing.dataCycle": "Ciclo dei dati",
 

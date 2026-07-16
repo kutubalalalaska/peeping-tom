@@ -100,6 +100,7 @@ export interface AppConfig {
   routes?: ReadRoute[];
   read_ttl_seconds?: number;   // how long a read lives after it's ready (hosted tier)
   max_upload_mb?: number;      // upload cap — powers the client-side slicer offer
+  out_of_credits?: boolean;    // the hosted account can't fund a read — landing shows the notice
 }
 
 // Reads left for this cookie-session (hosted tier). No PII — keyed on an opaque

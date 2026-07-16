@@ -106,6 +106,29 @@ def _check_route_auth():
         msg = f"[route {r.id}] auth {tag}: {detail} (model={r.model or '-'})"
         print(("!!! " + msg + " — reads on this route WILL fail until fixed") if ok is False
               else msg, flush=True)
+    threading.Thread(target=_refresh_credits, daemon=True).start()
+
+
+# Landing honesty: when the OpenRouter account can't fund a read anymore, say so
+# instead of letting uploads march into a mid-read 402. Refreshed lazily in the
+# background (config must never block on a remote probe); fail-open when unknown.
+_CREDITS = {"ts": 0.0, "remaining": None}
+_CREDITS_TTL = 300
+_CREDITS_FLOOR = 1.0        # USD — below this, a typical read risks dying mid-flight
+
+
+def _refresh_credits():
+    r = settings.route()
+    _CREDITS["remaining"] = provider.probe_credits(r) if r else None
+    _CREDITS["ts"] = time.time()
+
+
+def _out_of_credits() -> bool:
+    if time.time() - _CREDITS["ts"] > _CREDITS_TTL:
+        _CREDITS["ts"] = time.time()                    # claim the slot — no probe stampede
+        threading.Thread(target=_refresh_credits, daemon=True).start()
+    rem = _CREDITS["remaining"]
+    return rem is not None and rem < _CREDITS_FLOOR
 
 
 # ---- API ----
@@ -119,7 +142,8 @@ def get_config():
     return {"hosted": settings.hosted, "frontier_ready": settings.frontier_ready(),
             "routes": routes, "default_route": settings.default_route_id(),
             "read_ttl_seconds": settings.read_ttl_seconds,
-            "max_upload_mb": settings.max_upload_mb}
+            "max_upload_mb": settings.max_upload_mb,
+            "out_of_credits": _out_of_credits()}
 
 
 @app.get("/api/quota")

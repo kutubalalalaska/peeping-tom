@@ -200,6 +200,26 @@ def _http_status(url, headers, timeout=15):
         return None
 
 
+def probe_credits(route):
+    """Remaining prepaid credit (USD) on the route's OpenRouter account, or None
+    when unknowable (mock/self-host routes, network trouble). Never raises —
+    feeds the landing's honest out-of-credits notice, so fail-open, not loud."""
+    try:
+        if route.provider == "mock" or not route.ready():
+            return None
+        base = route.base_url.rstrip("/")
+        if "openrouter.ai" not in base:
+            return None
+        req = urllib.request.Request(base + "/credits",
+                                     headers={"Authorization": f"Bearer {route.api_key}"})
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as r:
+            d = (json.loads(r.read()) or {}).get("data") or {}
+        total, used = d.get("total_credits"), d.get("total_usage")
+        return None if total is None or used is None else float(total) - float(used)
+    except Exception:
+        return None
+
+
 def probe_auth(route):
     """Cheap boot-time auth check. (ok, detail): True = verified, False = rejected
     (bad/missing key), None = couldn't verify (don't cry wolf). Never raises —

@@ -2,24 +2,30 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Frame from "./Frame";
 import DataFlowModal from "./DataFlowModal";
-import { getQuota } from "../api";
+import { getConfig, getQuota } from "../api";
 import { SPIN } from "../lib/ascii";
 import { useSpinFrame } from "../lib/hooks";
 import { useT } from "../lib/i18n";
-import type { Quota } from "../types";
+import type { AppConfig, Quota } from "../types";
+
+const GITHUB_URL = "https://github.com/kutubalalalaska/immovable-object-part-1";
+const SUPPORT_URL = "https://instagram.com/syndinc";
 
 // Entry. Spare by design — the manifesto is held until launch. Copy here is
 // placeholder for the narrative thread to refine.
 export default function Landing() {
   const [modal, setModal] = useState(false);
   const [quota, setQuota] = useState<Quota | null>(null);
+  const [cfg, setCfg] = useState<AppConfig | null>(null);
   const nav = useNavigate();
   const { t } = useT();
   const spin = SPIN[useSpinFrame(true) % SPIN.length];
 
-  // Reads-left readout (hosted tier only; off-tier the endpoint returns enabled:false).
+  // Reads-left readout (hosted tier only; off-tier the endpoint returns enabled:false)
+  // + the out-of-credits notice (honesty: don't let uploads march into a dead read).
   useEffect(() => {
     getQuota().then(setQuota).catch(() => undefined);
+    getConfig().then(setCfg).catch(() => undefined);
   }, []);
   return (
     <>
@@ -41,6 +47,19 @@ export default function Landing() {
               {quota.remaining > 0
                 ? t("landing.quotaLeft", { remaining: quota.remaining, limit: quota.limit ?? 0 })
                 : t("landing.quotaNone", { limit: quota.limit ?? 0 })}
+            </div>
+          )}
+          {cfg?.out_of_credits && (
+            <div className="notice" style={{ marginTop: "10px" }}>
+              {t("landing.noCredits")}{" "}
+              <a className="link" href={GITHUB_URL} target="_blank" rel="noreferrer">
+                {t("landing.noCreditsRun")}
+              </a>
+              {t("landing.noCreditsMid")}
+              <a className="link" href={SUPPORT_URL} target="_blank" rel="noreferrer">
+                {t("landing.noCreditsSub")}
+              </a>
+              {t("landing.noCreditsTail")}
             </div>
           )}
         </div>
