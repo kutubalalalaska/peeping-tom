@@ -20,6 +20,11 @@ const GB = 1024 * 1024 * 1024;
 const fmtSize = (b: number) =>
   b >= GB ? `${(b / GB).toFixed(2)} GB` : `${Math.max(1, Math.round(b / 1048576))} MB`;
 
+// Per-axis readout state: over budget = alarm (blocks the cut); at the budget
+// = the axis that limits this window — emphasis, not alarm.
+const axisClass = (frac: number) =>
+  frac > 1 ? "fit-no" : frac >= 0.97 ? "lim" : undefined;
+
 // Shown when the chosen zip exceeds the upload cap: parse it LOCALLY, let the
 // user keep a date window (latest / earliest / middle, fine-tuned by sliders),
 // and hand back a rebuilt smaller zip + an honest range label. Nothing uploads
@@ -41,7 +46,6 @@ export default function Slicer({
   const [model, setModel] = useState<ExportModel | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [range, setRange] = useState<[number, number]>([0, 0]);
-  const [bound, setBound] = useState<"tokens" | "bytes" | "all">("all");
   const [building, setBuilding] = useState<[number, number] | null>(null);
 
   // Two budgets a slice must fit: the upload cap's bytes (minus zip headroom)
@@ -52,13 +56,11 @@ export default function Slicer({
     [capMB]
   );
 
-  // The ONE slider: its value is the window's start; the window itself always
-  // fills the budget from there (planFrom), so dragging slides a full
-  // one-read window along the chat.
+  // Presets drop a budget-FULL window at a position (planFrom); the two thumbs
+  // then move its edges freely — smaller is always allowed (share less), the
+  // per-axis readout flags anything bigger than one read can hold.
   function apply(m: ExportModel, start: number) {
-    const p = planFrom(m, budget, start);
-    setRange(p.range);
-    setBound(p.bound);
+    setRange(planFrom(m, budget, start).range);
   }
 
   useEffect(() => {
@@ -171,24 +173,39 @@ export default function Slicer({
         <pre className="spanbar">{spanBar(from / n, to / n)}</pre>
         <label>
           <span>{t("slice.window")}</span>
-          <input
-            type="range"
-            min={0}
-            max={n}
-            step={step}
-            value={from}
-            onChange={(e) => apply(model, +e.target.value)}
-          />
+          {/* one track, two thumbs: overlaid native ranges on the SAME fixed
+              0..n scale (thumbs-only pointer events); onChange clamps keep
+              from < to, so the handles can't cross. */}
+          <div className="dual">
+            <input
+              type="range"
+              aria-label={t("slice.from")}
+              min={0}
+              max={n}
+              step={step}
+              value={from}
+              onChange={(e) => setRange([Math.min(+e.target.value, to - 1), to])}
+            />
+            <input
+              type="range"
+              aria-label={t("slice.to")}
+              min={0}
+              max={n}
+              step={step}
+              value={to}
+              onChange={(e) => setRange([from, Math.max(+e.target.value, from + 1)])}
+            />
+          </div>
         </label>
       </div>
       <div className="slicestat">
         {t("slice.selected", { n: to - from, range: rangeLabel(model, from, to) })}
         {" · "}
-        <span className={bound === "tokens" ? "lim" : undefined}>
+        <span className={axisClass(estTok / budget.tokens)}>
           ≈ {Math.round(estTok / 1000)}k / {Math.round(budget.tokens / 1000)}k {t("slice.unitTokens")}
         </span>
         {" · "}
-        <span className={bound === "bytes" ? "lim" : undefined}>
+        <span className={axisClass(est / budget.bytes)}>
           {fmtSize(est)} / {fmtSize(budget.bytes)}
         </span>{" "}
         <span className={fits ? "fit-ok" : "fit-no"}>

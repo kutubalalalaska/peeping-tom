@@ -165,8 +165,24 @@ button { font: inherit; cursor: pointer; }
 .fit-no { color: var(--accent); }
 /* the kept window drawn on the whole chat's timeline */
 .spanbar { font-size: 11px; line-height: 1; color: var(--secondary); margin: 0 0 2px; overflow: hidden; }
-/* the budget axis that stopped the window growing — emphasis, not alarm */
+/* the budget axis this window is at (or over) — emphasis, not alarm */
 .lim { color: var(--ink); font-weight: 600; }
+/* one track, two thumbs: overlaid native ranges; only the thumbs take the pointer */
+.dual { position: relative; flex: 1; height: 18px; }
+.dual::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--hairline-2); }
+.dual input[type="range"] {
+  position: absolute; inset: 0; width: 100%; height: 18px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: none; pointer-events: none;
+}
+.dual input[type="range"]::-webkit-slider-runnable-track { background: transparent; height: 18px; }
+.dual input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; pointer-events: auto;
+  width: 12px; height: 12px; margin-top: 3px; background: var(--ink); border: none; border-radius: 0; cursor: ew-resize;
+}
+.dual input[type="range"]::-moz-range-track { background: transparent; }
+.dual input[type="range"]::-moz-range-thumb {
+  pointer-events: auto; width: 12px; height: 12px; background: var(--ink); border: none; border-radius: 0; cursor: ew-resize;
+}
 
 /* mode toggle sub-line (Start) */
 .modesub { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.6; max-width: 560px; }
