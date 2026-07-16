@@ -27,6 +27,10 @@ router = APIRouter()
 # via a callback instead of importing _preprocess (which would be a circular import).
 PREPROCESS = None
 
+# Same callback pattern: server.py's out-of-credits check. When it says True, new
+# uploads are refused up front (the landing shows the notice; this enforces it).
+GATE = None
+
 
 def _client_ip(request: Request) -> str:
     """Real client IP behind Cloudflare/Caddy (mirrors server._client_ip; duplicated
@@ -58,6 +62,8 @@ async def upload_init(request: Request, source: str = Form("whatsapp"),
     """Begin a resumable upload: apply the hosted rate cap + a total-size guard up
     front (an over-cap file is rejected before a single byte is sent), create the job,
     and return its id + the chunk size to use."""
+    if GATE is not None and GATE():
+        raise HTTPException(503, "We are out of free trials for now. Try later, or run the app yourself.")
     if size and size > _max_bytes():
         raise HTTPException(413, f"That chat export is too large (max {settings.max_upload_mb} MB).")
     if settings.hosted:

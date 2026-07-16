@@ -164,6 +164,10 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
                  mode: str = Form("fast"), slice_range: str = Form(""),
                  slice_before: int = Form(0), slice_after: int = Form(0),
                  slice_full: str = Form("")):
+    # No new uploads once the hosted account can't fund the read — the landing's
+    # notice made this visible; here it's enforced (transparency = code, not copy).
+    if _out_of_credits():
+        raise HTTPException(503, "We are out of free trials for now. Try later, or run the app yourself.")
     # Abuse moat (hosted tier only): cap reads per cookie-session and per IP over a
     # rolling window. No login, no PII — just enough to stop scraping + runaway spend.
     if settings.hosted:
@@ -272,6 +276,7 @@ def messages(job_id: str, ids: str = ""):
 # The chunked-upload router hands finished uploads back to the LOCAL pipeline via
 # this callback (set here to avoid a circular import between server and uploads).
 uploads.PREPROCESS = pipeline.run
+uploads.GATE = _out_of_credits
 
 
 # ---- frontend ----

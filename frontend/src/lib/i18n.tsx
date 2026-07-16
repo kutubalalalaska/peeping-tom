@@ -52,6 +52,8 @@ const en = {
     "this is my own conversation and it contains no illegal content.",
   "start.errRate": "You've reached your reads for now. Try again later.",
   "start.errTooLarge": "That chat export is too large to upload here.",
+  "start.errPaused":
+    "we are out of free trials for now — reads are paused. run the app yourself, or check back later.",
   "start.errWrongPlatform":
     "this looks like a {found} export, but {selected} is selected — go back and pick {found}.",
   "start.errNotExport":
@@ -282,6 +284,8 @@ const ru: Dict = {
   "start.errRate":
     "Вы исчерпали лимит разборов на сейчас. Попробуйте позже.",
   "start.errTooLarge": "Этот экспорт чата слишком большой для загрузки здесь.",
+  "start.errPaused":
+    "бесплатные разборы пока закончились — загрузка приостановлена. запустите приложение у себя или загляните позже.",
   "start.errWrongPlatform":
     "похоже, это экспорт из {found}, а выбран {selected} — вернитесь и выберите {found}.",
   "start.errNotExport":
@@ -509,6 +513,8 @@ const it: Dict = {
   "start.errRate":
     "Hai raggiunto il limite di letture per ora. Riprova più tardi.",
   "start.errTooLarge": "Questo export della chat è troppo grande per caricarlo qui.",
+  "start.errPaused":
+    "le prove gratuite sono finite per ora — le letture sono in pausa. esegui l'app da te, oppure riprova più tardi.",
   "start.errWrongPlatform":
     "sembra un export di {found}, ma è selezionato {selected} — torna indietro e scegli {found}.",
   "start.errNotExport":

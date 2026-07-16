@@ -12,10 +12,11 @@ import Slicer from "./Slicer";
 // Pull a human message out of a thrown api error ("429 {\"detail\":\"…\"}"). The
 // backend detail is English, so for the guard cases we show localized copy; other
 // (technical) errors surface raw.
-function friendlyError(e: unknown, rateMsg: string, tooLargeMsg: string): string {
+function friendlyError(e: unknown, rateMsg: string, tooLargeMsg: string, pausedMsg: string): string {
   const s = String(e);
   if (s.includes("429")) return rateMsg;
   if (s.includes("413")) return tooLargeMsg;
+  if (s.includes("503")) return pausedMsg;
   return s;
 }
 
@@ -172,7 +173,7 @@ export default function Start() {
     } catch (e) {
       busyRef.current = false;
       if ((e as Error)?.name === "AbortError") return; // navigated away — nothing to show
-      setErr(friendlyError(e, t("start.errRate"), t("start.errTooLarge")));
+      setErr(friendlyError(e, t("start.errRate"), t("start.errTooLarge"), t("start.errPaused")));
       setBusy(false);
     }
   }

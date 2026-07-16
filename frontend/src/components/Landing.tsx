@@ -38,7 +38,11 @@ export default function Landing() {
         </div>
         <div className="ln" style={{ animationDelay: "80ms" }}>
           <div className="row" style={{ marginTop: "10px" }}>
-            <button className="opt solid" onClick={() => nav("/start")}>
+            <button
+              className="opt solid"
+              disabled={!!cfg?.out_of_credits}
+              onClick={() => nav("/start")}
+            >
               {t("landing.begin")}
             </button>
           </div>
