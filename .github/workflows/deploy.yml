@@ -24,11 +24,25 @@ name: deploy-prod
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      attempt:
+        description: "auto-retry counter (set by the workflow itself)"
+        required: false
+        default: "1"
 
 concurrency:
   group: deploy-prod
   cancel-in-progress: false   # never interrupt a build/deploy midway
+
+# Hostinger's edge drops SOME Azure IP ranges (live finding 2026-07-17: uptime
+# probes consistently blocked, deploys usually fine — runner IP roulette). When
+# the SSH connect times out, the job below re-dispatches itself so a FRESH
+# runner (fresh IP) retries, up to 3 attempts, and pings the operator's
+# Telegram when it retries or gives up. Always deploys origin/main HEAD, so a
+# retried run can never ship stale code.
+permissions:
+  actions: write               # lets the failure step re-dispatch this workflow
 
 jobs:
   deploy:
@@ -56,3 +70,25 @@ jobs:
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "$VPS_USER@$VPS_HOST" \
             'set -e; cd ~/immovable-object-part-1; git fetch --all --prune; git reset --hard origin/main; docker compose -f docker-compose.prod.yml up -d --build; docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || echo "WARN: caddy reload failed (Caddyfile change not applied)"; docker image prune -f; docker compose -f docker-compose.prod.yml ps'
+
+      - name: Retry from a fresh runner on failure (new IP), alert on give-up
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTEMPT: ${{ github.event.inputs.attempt || '1' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          alert() {
+            if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+              curl -sS -m 15 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$1" > /dev/null || true
+            fi
+          }
+          if [ "$ATTEMPT" -lt 3 ]; then
+            echo "deploy attempt $ATTEMPT failed — re-dispatching from a fresh runner"
+            alert "⚠️ prod deploy attempt $ATTEMPT failed (likely a blocked runner IP) — retrying from a fresh runner"
+            gh workflow run deploy-prod -R "${{ github.repository }}" -f attempt=$((ATTEMPT + 1))
+          else
+            alert "🔴 prod deploy FAILED after $ATTEMPT attempts — main is NOT deployed. Check the Actions tab."
+          fi
