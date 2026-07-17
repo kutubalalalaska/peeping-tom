@@ -69,6 +69,10 @@ def _log_outcome(job_id: str, seconds: int):
                          "structure_repaired": True if r.get("structure_repaired") else None}
             events.log("job_done", job=job_id, seconds=seconds, mode=st.get("mode"),
                        tier=(st.get("plan") or {}).get("tier"), **extra)
+            cites = extra.get("citations")
+            alerts.activity(f"✅ read done: {st.get('mode')} · {seconds // 60}m{seconds % 60:02d}s"
+                            + (f" · {cites} citations" if cites is not None else "")
+                            + f" (job {job_id[:6]})")
         elif state == "needs_config":
             events.log("job_needs_config", job=job_id, reason=(st.get("message") or "")[:300])
             alerts.send(f"⚠️ a read hit needs_config: {(st.get('message') or '')[:200]}", key="needs_config")

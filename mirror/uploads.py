@@ -18,7 +18,7 @@ Flow:
 
 from fastapi import APIRouter, Request, Form, HTTPException, BackgroundTasks
 
-from . import events, ingest, jobs
+from . import alerts, events, ingest, jobs
 from .config import MODES, settings
 
 router = APIRouter()
@@ -158,6 +158,7 @@ async def upload_complete(jid: str, bg: BackgroundTasks):
     p.unlink(missing_ok=True)
     events.log("upload_accepted", job=jid, via="chunked", source=s.get("source"),
                mode=s.get("mode"), size_mb=size_mb)
+    alerts.activity(f"📥 new read: {s.get('source')} · {s.get('mode')} · {size_mb} MB (job {jid[:6]})")
     if PREPROCESS is None:                               # should never happen once server wired it
         jobs.set_status(jid, state="error", message="server not ready")
         raise HTTPException(500, "pipeline not wired")

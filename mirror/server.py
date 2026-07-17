@@ -242,6 +242,7 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
     zp.unlink(missing_ok=True)
     events.log("upload_accepted", job=jid, via="single", source=source,
                mode=mode if mode in MODES else "fast", size_mb=size_mb)
+    alerts.activity(f"📥 new read: {source} · {mode if mode in MODES else 'fast'} · {size_mb} MB (job {jid[:6]})")
     bg.add_task(pipeline.run, jid)
     return {"job_id": jid}
 

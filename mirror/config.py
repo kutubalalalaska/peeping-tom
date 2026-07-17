@@ -221,6 +221,8 @@ class Settings:
     admin_pass: str = os.environ.get("ADMIN_PASS", "")      # empty = /admin answers 404
     telegram_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat: str = os.environ.get("TELEGRAM_CHAT_ID", "")
+    # Also ping on normal activity (new upload, finished read) — launch-watching.
+    telegram_activity: bool = _b("TELEGRAM_ACTIVITY", "1")
 
     # --- upload guard + paths ---
     # v0 decision (2026-07-10): sized so any accepted chat reads in ONE coherent
