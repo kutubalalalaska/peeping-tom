@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Frame from "./Frame";
 import DataFlowModal from "./DataFlowModal";
-import { getConfig, getQuota } from "../api";
+import { beacon, getConfig, getQuota } from "../api";
 import { SPIN } from "../lib/ascii";
 import { useSpinFrame } from "../lib/hooks";
 import { useT } from "../lib/i18n";
@@ -56,7 +56,8 @@ export default function Landing() {
           {cfg?.out_of_credits && (
             <div className="notice" style={{ marginTop: "10px" }}>
               {t("landing.noCredits")}{" "}
-              <a className="link" href={GITHUB_URL} target="_blank" rel="noreferrer">
+              <a className="link" href={GITHUB_URL} target="_blank" rel="noreferrer"
+                 onClick={() => beacon("github")}>
                 {t("landing.noCreditsRun")}
               </a>
               {t("landing.noCreditsMid")}
@@ -71,13 +72,20 @@ export default function Landing() {
           <div className="links">
             <a
               className="link"
-              href="https://github.com/kutubalalalaska/immovable-object-part-1"
+              href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
+              onClick={() => beacon("github")}
             >
               {t("landing.source")}
             </a>
-            <button className="link" onClick={() => setModal(true)}>
+            <button
+              className="link"
+              onClick={() => {
+                beacon("dataflow");
+                setModal(true);
+              }}
+            >
               {t("landing.dataCycle")}&nbsp;{spin}
             </button>
           </div>

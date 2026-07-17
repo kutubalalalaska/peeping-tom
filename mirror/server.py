@@ -15,7 +15,7 @@ API:
 Frontend: serves the built React SPA from WEB_DIR if present, else placeholder pages.
 """
 
-import json, threading, time, uuid
+import json, re, threading, time, uuid
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, Request
@@ -49,6 +49,13 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+# Funnel top: a landing hit from a browser we haven't seen (no cookie yet) counts
+# as one visit — a COUNT, not a record: no ip/sid/ua is stored (events.py's rule).
+# Best-effort bot skip; crawlers that lie about their UA will inflate the number.
+_BOT_RE = re.compile(r"bot|crawl|spider|preview|scan|fetch|curl|wget|python|scrapy|"
+                     r"monitor|pingdom|lighthouse|headless|slurp|facebookexternal")
+
+
 @app.middleware("http")
 async def _session_cookie(request: Request, call_next):
     """Give every browser an opaque, no-PII session id in an httponly cookie. It only
@@ -60,6 +67,12 @@ async def _session_cookie(request: Request, call_next):
         sid = uuid.uuid4().hex
     request.state.sid = sid
     response = await call_next(request)
+    if (fresh and request.method == "GET" and request.url.path == "/"
+            and response.status_code == 200
+            and not _BOT_RE.search(request.headers.get("user-agent", "").lower())):
+        events.log("visit")
+        n = sum(1 for e in events.read(since=time.time() - 86400) if e.get("event") == "visit")
+        alerts.activity(f"👀 visit — #{n} in 24h", key="visit")
     if fresh:
         response.set_cookie(settings.session_cookie, sid, max_age=60 * 60 * 24 * 30,
                             httponly=True, samesite="lax", secure=settings.cookie_secure)
@@ -245,6 +258,23 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
     alerts.activity(f"📥 new read: {source} · {mode if mode in MODES else 'fast'} · {size_mb} MB (job {jid[:6]})")
     bg.add_task(pipeline.run, jid)
     return {"job_id": jid}
+
+
+@app.post("/api/beacon")
+async def beacon(request: Request):
+    """Anonymous, count-only engagement beacon from the frontend: the source link
+    was opened, the data-flow explainer was watched. Whitelisted names; nothing
+    about the sender is stored — this measures the FUNNEL, never a person."""
+    try:
+        what = str((await request.json()).get("what") or "")
+    except Exception:
+        what = ""
+    if what not in ("github", "dataflow"):
+        raise HTTPException(400)
+    events.log(f"beacon_{what}")
+    alerts.activity("🐙 source opened on github" if what == "github"
+                    else "🎞 data-flow explainer opened", key=f"beacon_{what}")
+    return {"ok": True}
 
 
 @app.get("/api/jobs/{job_id}")

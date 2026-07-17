@@ -134,3 +134,22 @@ export const deleteJob = async (id: string) =>
 export const transcriptUrl = (id: string) => `/api/jobs/${id}/transcript`;
 export const mediaUrl = (id: string, name: string) =>
   `/api/jobs/${id}/media/${encodeURIComponent(name)}`;
+
+// Anonymous, count-only engagement beacon (source link opened, data-flow
+// explainer watched). Fire-and-forget: never blocks or breaks the UI, and
+// carries nothing about the person — it measures the funnel, not the visitor.
+export const beacon = (what: "github" | "dataflow") => {
+  try {
+    const body = JSON.stringify({ what });
+    if (!navigator.sendBeacon?.("/api/beacon", new Blob([body], { type: "application/json" }))) {
+      void fetch("/api/beacon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => undefined);
+    }
+  } catch {
+    /* telemetry must never break the page */
+  }
+};

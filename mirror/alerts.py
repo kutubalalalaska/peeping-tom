@@ -38,14 +38,21 @@ def send(text: str, key: str = None):
     threading.Thread(target=_post, args=(text,), daemon=True).start()
 
 
-def activity(text: str):
-    """Product-activity notice — someone is actually using it (new upload, finished
-    read). No cooldown: at friends-test scale each one is the point (the rate moat
-    bounds volume anyway). Separate from problem alerts so launch-watching can be
-    switched off later (TELEGRAM_ACTIVITY=0) without touching alerting. Same
-    no-PII rule as events.py: what happened, never who."""
+def activity(text: str, key: str = None):
+    """Product-activity notice — someone is actually using it (visit, upload,
+    finished read). Separate from problem alerts so launch-watching can be switched
+    off later (TELEGRAM_ACTIVITY=0) without touching alerting. Same no-PII rule as
+    events.py: what happened, never who.
+
+    No `key` = ping every time (uploads/reads — each one is the point, and the rate
+    moat bounds them). A `key` adds the cooldown: visits and beacons are unbounded
+    by anything, so a burst collapses into '+N similar' instead of a Telegram flood
+    (the event log still counts every one)."""
     if enabled() and settings.telegram_activity:
-        threading.Thread(target=_post, args=(text,), daemon=True).start()
+        if key:
+            send(text, key=key)
+        else:
+            threading.Thread(target=_post, args=(text,), daemon=True).start()
 
 
 def _post(text: str):

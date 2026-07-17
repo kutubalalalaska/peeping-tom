@@ -55,11 +55,18 @@ def _mem():
 
 
 def _counts(evs):
-    c = {"uploads": 0, "done": 0, "failed": 0, "cancelled": 0, "http_5xx": 0, "refused": {}}
+    c = {"uploads": 0, "done": 0, "failed": 0, "cancelled": 0, "http_5xx": 0, "refused": {},
+         "visits": 0, "dataflow": 0, "github": 0}
     durs = []
     for e in evs:
         ev = e.get("event")
-        if ev == "upload_accepted":
+        if ev == "visit":
+            c["visits"] += 1
+        elif ev == "beacon_dataflow":
+            c["dataflow"] += 1
+        elif ev == "beacon_github":
+            c["github"] += 1
+        elif ev == "upload_accepted":
             c["uploads"] += 1
         elif ev == "job_done":
             c["done"] += 1
@@ -145,7 +152,9 @@ const t = ts => ts ? new Date(ts*1000).toLocaleString(undefined,{month:"short",d
 function row(cells){ return "<tr>"+cells.map(c=>"<td class=detail>"+c+"</td>").join("")+"</tr>"; }
 function table(head, rows){ return rows.length ? "<table><tr>"+head.map(h=>"<th>"+h+"</th>").join("")+"</tr>"+rows.join("")+"</table>" : "<span class=dim>none</span>"; }
 function counts(c){ const ref = Object.entries(c.refused||{}).map(([k,v])=>k+":"+v).join(" ")||"0";
-  return `uploads ${c.uploads} · done ${c.done} · <span class="${c.failed?"bad":""}">failed ${c.failed}</span> · refused ${esc(ref)} · cancelled ${c.cancelled} · 5xx ${c.http_5xx}` + (c.avg_read_s?` · avg read ${ago(c.avg_read_s)}`:""); }
+  const conv = c.visits ? ` (${Math.round(c.uploads*100/c.visits)}% of visits)` : "";
+  return `${c.visits} visits → ${c.dataflow} explainer · ${c.github} source → ${c.uploads} uploads${conv}<br>`
+       + `&nbsp;&nbsp;&nbsp;&nbsp;done ${c.done} · <span class="${c.failed?"bad":""}">failed ${c.failed}</span> · refused ${esc(ref)} · cancelled ${c.cancelled} · 5xx ${c.http_5xx}` + (c.avg_read_s?` · avg read ${ago(c.avg_read_s)}`:""); }
 async function refresh(){
   let d; try { d = await (await fetch("/api/admin/summary")).json(); } catch(e){ document.getElementById("meta").innerHTML='<span class=bad>summary fetch failed</span>'; return; }
   document.getElementById("meta").textContent = `app up ${ago(d.now-d.started)} · refreshed ${new Date().toLocaleTimeString()}`;
