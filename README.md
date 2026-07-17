@@ -119,6 +119,37 @@ under sixty lines, read it.
 **Consent line:** the demo requires you to confirm the conversation is your
 own and lawful. Upload only chats you have the right to share.
 
+### can the operator read my chat?
+
+**Technically, yes — while it is being processed.** Honesty requires this
+section. For the minutes a job lives, the server holds your export, the decoded
+captions and transcripts, and the finished read in plaintext — because
+processing requires plaintext: a local model cannot caption an encrypted photo,
+and the reading model cannot read encrypted text. Any hosted service whose
+server processes your data could read it; a scheme that claimed otherwise
+("we hash your uploads", "we can't see your data") would be a lock with the key
+taped to it, and we'd rather tell you the truth than sell you that.
+
+What actually bounds the exposure:
+
+- **Time.** The upload zip is destroyed the moment it's unpacked; the job's
+  working data lives only until the read self-destructs (20 minutes after it's
+  ready, or the delete button, whichever comes first).
+- **No copies.** Job data is written to exactly one place — the job's own
+  directory, which is what the self-destruct deletes. The VPS keeps **no
+  backups and no snapshots**: automatic provider backups are switched off
+  precisely so that "deleted" means *gone*, not "gone except the copy from
+  3 a.m." (This is also why we can't recover your read after it expires —
+  that's the point.)
+- **Auditable code.** The pipeline handling your data is this public repo,
+  deployed from `main` — what the code does is checkable by anyone.
+
+And the honest boundary: none of this *proves* the operator doesn't look while
+a job is alive. No hosted service can prove that, whatever its marketing says.
+If a chat deserves stronger guarantees than a promise bounded by minutes,
+that's not a reason to trust us harder — it's the reason self-hosting exists.
+The demo is the advertisement; self-host is the product.
+
 ### the honest limits
 
 A text transcript of your private conversation is still sensitive data. This
