@@ -31,19 +31,54 @@ import os
 import threading
 import time
 
-from . import budget, decode, ingest, jobs, manifest, mediatypes, protocol, provider
+from . import alerts, budget, decode, events, ingest, jobs, manifest, mediatypes, protocol, provider
 from . import transcript as T
 from .config import MODES, settings
 
 
 def run(job_id: str):
     """Background entrypoint (wired to both upload paths)."""
+    st0 = jobs.get_status(job_id) or {}
+    t0 = time.monotonic()
+    events.log("job_started", job=job_id, source=st0.get("source"), mode=st0.get("mode"))
     try:
         _run(job_id)
     except provider.NotConfigured as e:
         jobs.set_status(job_id, state="needs_config", message=str(e))
     except Exception as e:
         jobs.set_status(job_id, state="error", message=f"read failed: {e}")
+    _log_outcome(job_id, round(time.monotonic() - t0))
+
+
+def _log_outcome(job_id: str, seconds: int):
+    """One ops event per job, whatever the exit path (pipeline.run sets the final
+    state before this runs). Failures also ping the operator. Never raises."""
+    try:
+        st = jobs.get_status(job_id)
+        if st is None:                             # dir gone mid-run — the user hit delete
+            events.log("job_cancelled", job=job_id, seconds=seconds)
+            return
+        state, phase = st.get("state"), st.get("phase")
+        if state == "done":
+            extra = {}
+            rp = jobs.path(job_id, "read.json")
+            if rp.exists():
+                r = json.loads(rp.read_text())
+                extra = {"citations": len(r.get("citations") or []),
+                         "citations_dropped": r.get("citations_dropped") or None,
+                         "structure_repaired": True if r.get("structure_repaired") else None}
+            events.log("job_done", job=job_id, seconds=seconds, mode=st.get("mode"),
+                       tier=(st.get("plan") or {}).get("tier"), **extra)
+        elif state == "needs_config":
+            events.log("job_needs_config", job=job_id, reason=(st.get("message") or "")[:300])
+            alerts.send(f"⚠️ a read hit needs_config: {(st.get('message') or '')[:200]}", key="needs_config")
+        else:
+            reason = (st.get("message") or "")[:300]
+            events.log("job_failed", job=job_id, seconds=seconds, phase=phase,
+                       mode=st.get("mode"), reason=reason)
+            alerts.send(f"❌ read failed (phase={phase}, {seconds}s): {reason[:200]}", key="job_failed")
+    except Exception as e:
+        print(f"[events] outcome log failed: {e}", flush=True)
 
 
 def _run(job_id: str):

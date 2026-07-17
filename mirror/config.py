@@ -216,6 +216,12 @@ class Settings:
     session_cookie: str = "mirror_sid"
     cookie_secure: bool = _b("COOKIE_SECURE")
 
+    # --- ops: admin page + problem alerts (optional; unset = feature off) ---
+    admin_user: str = os.environ.get("ADMIN_USER", "admin")
+    admin_pass: str = os.environ.get("ADMIN_PASS", "")      # empty = /admin answers 404
+    telegram_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    telegram_chat: str = os.environ.get("TELEGRAM_CHAT_ID", "")
+
     # --- upload guard + paths ---
     # v0 decision (2026-07-10): sized so any accepted chat reads in ONE coherent
     # pass — the client-side slicer enforces the token axis, this caps the bytes.

@@ -22,7 +22,7 @@ from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, R
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import decode, ingest, jobs, mediatypes, pipeline, provider, uploads
+from . import admin, alerts, decode, events, ingest, jobs, mediatypes, pipeline, provider, uploads
 from .config import MODES, settings
 
 HERE = Path(__file__).parent
@@ -34,6 +34,7 @@ app = FastAPI(title="Drop 001: Peeping Tom")
 # Resumable chunked-upload routes (mirror/uploads.py). Registered here, BEFORE the
 # SPA catch-all below, so GET /api/upload/{id}/offset isn't shadowed by it.
 app.include_router(uploads.router)
+app.include_router(admin.router)                    # /admin + /api/admin/* (404 unless ADMIN_PASS set)
 
 
 def _client_ip(request: Request) -> str:
@@ -62,6 +63,24 @@ async def _session_cookie(request: Request, call_next):
     if fresh:
         response.set_cookie(settings.session_cookie, sid, max_age=60 * 60 * 24 * 30,
                             httponly=True, samesite="lax", secure=settings.cookie_secure)
+    return response
+
+
+@app.middleware("http")
+async def _ops_watch(request: Request, call_next):
+    """Ops visibility: any 5xx — returned or raised — lands in the event log and
+    pings the operator. 4xx don't (rate caps and purged-job 404s are normal life),
+    and neither does 503 (the deliberate out-of-credits refusal, logged with its
+    reason at the source)."""
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        events.log("http_5xx", path=request.url.path, error=str(e)[:200])
+        alerts.send(f"💥 crash on {request.url.path}: {str(e)[:200]}", key="http_5xx")
+        raise
+    if response.status_code >= 500 and response.status_code != 503:
+        events.log("http_5xx", path=request.url.path, status=response.status_code)
+        alerts.send(f"💥 HTTP {response.status_code} on {request.url.path}", key="http_5xx")
     return response
 
 
@@ -117,10 +136,30 @@ _CREDITS_TTL = 300
 _CREDITS_FLOOR = 1.0        # USD — below this, a typical read risks dying mid-flight
 
 
+_CREDITS_WARN = 5.0         # heads-up band: top up before the gate closes
+
+
 def _refresh_credits():
     r = settings.route()
-    _CREDITS["remaining"] = provider.probe_credits(r) if r else None
+    was = _CREDITS["remaining"]
+    rem = provider.probe_credits(r) if r else None
+    _CREDITS["remaining"] = rem
     _CREDITS["ts"] = time.time()
+    # Operator alert on band TRANSITIONS only (ok → low → gated and back), so a
+    # steady balance never repeats itself into the Telegram chat.
+    band = lambda v: None if v is None else (
+        "gated" if v < _CREDITS_FLOOR else "low" if v < _CREDITS_WARN else "ok")
+    b0, b1 = band(was), band(rem)
+    if b1 == b0 or b1 is None:
+        return
+    if b1 == "gated":
+        events.log("out_of_credits", remaining=round(rem, 2))
+        alerts.send(f"💸 OpenRouter balance ${rem:.2f} — below the ${_CREDITS_FLOOR:.0f} floor, uploads are now GATED")
+    elif b1 == "low" and b0 != "gated":
+        alerts.send(f"💸 OpenRouter balance ${rem:.2f} — running low, uploads gate below ${_CREDITS_FLOOR:.0f}")
+    elif b0 == "gated":
+        events.log("credits_restored", remaining=round(rem, 2))
+        alerts.send(f"✅ OpenRouter balance ${rem:.2f} — uploads open again")
 
 
 def _out_of_credits() -> bool:
@@ -167,14 +206,17 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
     # No new uploads once the hosted account can't fund the read — the landing's
     # notice made this visible; here it's enforced (transparency = code, not copy).
     if _out_of_credits():
+        events.log("upload_refused", reason="out_of_credits", via="single")
         raise HTTPException(503, "We are out of free trials for now. Try later, or run the app yourself.")
     # Abuse moat (hosted tier only): cap reads per cookie-session and per IP over a
     # rolling window. No login, no PII — just enough to stop scraping + runaway spend.
     if settings.hosted:
         sid, ip = request.state.sid, _client_ip(request)
         if jobs.recent_count(settings.rate_window_seconds, sid=sid) >= settings.rate_max_per_session:
+            events.log("upload_refused", reason="rate_session", via="single")
             raise HTTPException(429, "You've reached your reads for now. Try again later.")
         if ip and jobs.recent_count(settings.rate_window_seconds, ip=ip) >= settings.rate_max_per_ip:
+            events.log("upload_refused", reason="rate_ip", via="single")
             raise HTTPException(429, "This network has reached its reads for now. Try again later.")
         jid = jobs.create(source=source, sid=sid, ip=ip)
     else:
@@ -195,8 +237,11 @@ async def upload(request: Request, bg: BackgroundTasks, file: UploadFile,
     with zp.open("wb") as out:
         while chunk := await file.read(4 * 1024 * 1024):
             out.write(chunk)
+    size_mb = round(zp.stat().st_size / 1048576, 1)
     ingest.unzip(zp, jobs.path(jid, "export"))
     zp.unlink(missing_ok=True)
+    events.log("upload_accepted", job=jid, via="single", source=source,
+               mode=mode if mode in MODES else "fast", size_mb=size_mb)
     bg.add_task(pipeline.run, jid)
     return {"job_id": jid}
 
@@ -277,6 +322,12 @@ def messages(job_id: str, ids: str = ""):
 # this callback (set here to avoid a circular import between server and uploads).
 uploads.PREPROCESS = pipeline.run
 uploads.GATE = _out_of_credits
+
+# The admin page reads the live credits/auth state through the same callback
+# pattern (admin.py must not import server.py).
+admin.CREDITS = _CREDITS
+admin.ROUTE_AUTH = _ROUTE_AUTH
+admin.OUT_OF_CREDITS = _out_of_credits
 
 
 # ---- frontend ----

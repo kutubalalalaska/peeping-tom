@@ -1,0 +1,81 @@
+name: uptime
+
+# External uptime probe for the hosted exhibit. Runs OFF the VPS on purpose:
+# when the box dies, on-box monitoring dies with it — this doesn't.
+#
+# Probes https://peeping-tom.com/api/config (3 tries): healthy = HTTP 200 AND
+# frontier_ready:true. On a state TRANSITION (up->down or down->up) it messages
+# the operator's Telegram (same bot as the app's alerts). Repo secrets needed:
+# TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID — without them it still probes, just
+# can't alert. Last known state rides the Actions cache between runs so a long
+# outage doesn't ping every 5 minutes.
+#
+# NOTE: GitHub cron is best-effort — "*/5" lands every 5-15 min in practice.
+# Good enough for a friends test; swap in UptimeRobot/BetterStack for tighter SLAs.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore last known state
+        uses: actions/cache/restore@v4
+        with:
+          path: uptime-state
+          key: uptime-state-${{ github.run_id }}   # never matches — always falls to restore-keys
+          restore-keys: uptime-state-
+
+      - name: Probe the site
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -uo pipefail
+          URL="https://peeping-tom.com/api/config"
+          STATE_FILE="uptime-state/state"
+          PREV=$(cat "$STATE_FILE" 2>/dev/null || echo up)   # assume up on first ever run
+          STATUS=down; DETAIL=""
+          for i in 1 2 3; do
+            CODE=$(curl -sS -m 20 -o body.json -w '%{http_code}' "$URL" 2>curl.err || echo 000)
+            if [ "$CODE" = "200" ] && [ "$(jq -r .frontier_ready body.json 2>/dev/null)" = "true" ]; then
+              STATUS=up; break
+            fi
+            DETAIL="HTTP $CODE $(cat curl.err 2>/dev/null | head -c 120)"
+            [ "$CODE" = "200" ] && DETAIL="HTTP 200 but frontier_ready != true"
+            [ $i -lt 3 ] && sleep 20
+          done
+          echo "probe: $STATUS (prev: $PREV) $DETAIL"
+          mkdir -p uptime-state && echo "$STATUS" > "$STATE_FILE"
+          alert() {
+            if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+              curl -sS -m 15 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$1" > /dev/null || true
+            else
+              echo "(no telegram secrets — probe only, cannot alert)"
+            fi
+          }
+          if [ "$STATUS" = down ] && [ "$PREV" != down ]; then
+            alert "🔴 peeping-tom.com is DOWN — $DETAIL (probe from GitHub Actions)"
+          elif [ "$STATUS" = up ] && [ "$PREV" = down ]; then
+            alert "🟢 peeping-tom.com is back up"
+          fi
+          # the workflow itself stays green unless the SITE is down (so the Actions
+          # tab doubles as an uptime history)
+          [ "$STATUS" = up ]
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: uptime-state
+          key: uptime-state-${{ github.run_id }}

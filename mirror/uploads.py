@@ -18,7 +18,7 @@ Flow:
 
 from fastapi import APIRouter, Request, Form, HTTPException, BackgroundTasks
 
-from . import ingest, jobs
+from . import events, ingest, jobs
 from .config import MODES, settings
 
 router = APIRouter()
@@ -63,18 +63,26 @@ async def upload_init(request: Request, source: str = Form("whatsapp"),
     front (an over-cap file is rejected before a single byte is sent), create the job,
     and return its id + the chunk size to use."""
     if GATE is not None and GATE():
+        events.log("upload_refused", reason="out_of_credits", via="chunked")
         raise HTTPException(503, "We are out of free trials for now. Try later, or run the app yourself.")
     if size and size > _max_bytes():
+        events.log("upload_refused", reason="too_large", via="chunked",
+                   size_mb=round(size / 1048576, 1))
         raise HTTPException(413, f"That chat export is too large (max {settings.max_upload_mb} MB).")
     if settings.hosted:
         sid, ip = request.state.sid, _client_ip(request)
         if jobs.recent_count(settings.rate_window_seconds, sid=sid) >= settings.rate_max_per_session:
+            events.log("upload_refused", reason="rate_session", via="chunked")
             raise HTTPException(429, "You've reached your reads for now. Try again later.")
         if ip and jobs.recent_count(settings.rate_window_seconds, ip=ip) >= settings.rate_max_per_ip:
+            events.log("upload_refused", reason="rate_ip", via="chunked")
             raise HTTPException(429, "This network has reached its reads for now. Try again later.")
         jid = jobs.create(source=source, sid=sid, ip=ip)
     else:
         jid = jobs.create(source=source)
+    events.log("upload_started", job=jid, via="chunked", source=source,
+               mode=mode if mode in MODES else "fast",
+               size_mb=round((size or 0) / 1048576, 1) or None)
     jobs.set_status(jid, state="uploading", message="receiving your chat…",
                     lang=(lang or "en").split("-")[0].lower()[:5],
                     mode=mode if mode in MODES else "fast",
@@ -140,12 +148,16 @@ async def upload_complete(jid: str, bg: BackgroundTasks):
     if declared and _received(jid) != declared:
         raise HTTPException(409, detail={"error": "incomplete upload",
                                          "received": _received(jid), "size": declared})
+    size_mb = round(p.stat().st_size / 1048576, 1)
     try:
         ingest.unzip(p, jobs.path(jid, "export"))
     except Exception as e:
         jobs.set_status(jid, state="error", message=f"couldn't open the upload: {e}")
+        events.log("upload_failed", job=jid, reason="bad_zip", detail=str(e)[:200])
         raise HTTPException(400, "the upload wasn't a valid zip")
     p.unlink(missing_ok=True)
+    events.log("upload_accepted", job=jid, via="chunked", source=s.get("source"),
+               mode=s.get("mode"), size_mb=size_mb)
     if PREPROCESS is None:                               # should never happen once server wired it
         jobs.set_status(jid, state="error", message="server not ready")
         raise HTTPException(500, "pipeline not wired")
