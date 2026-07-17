@@ -1,4 +1,4 @@
-# immovable object — part 1: peeping tom
+# peeping tom — drop 001
 
 Upload a chat history. A frontier model reads it whole — the patterns, the arc,
 the things you stopped noticing — and hands the reading back **with receipts**:
