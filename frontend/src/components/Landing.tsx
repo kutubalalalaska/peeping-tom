@@ -8,7 +8,7 @@ import { useSpinFrame } from "../lib/hooks";
 import { useT } from "../lib/i18n";
 import type { AppConfig, Quota } from "../types";
 
-const GITHUB_URL = "https://github.com/kutubalalalaska/immovable-object-part-1";
+const GITHUB_URL = "https://github.com/kutubalalalaska/peeping-tom";
 const SUPPORT_URL = "https://instagram.com/syndinc";
 
 // Entry. Spare by design — the manifesto is held until launch. Copy here is

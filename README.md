@@ -153,7 +153,7 @@ worth that for a given chat: don't upload that chat, or self-host and point
 ## run it yourself
 
 ```bash
-git clone https://github.com/kutubalalalaska/immovable-object-part-1 && cd immovable-object-part-1
+git clone https://github.com/kutubalalalaska/peeping-tom && cd peeping-tom
 cp .env.example .env       # set ROUTE_A_* (e.g. an OpenRouter key), or ROUTE_A_PROVIDER=mock
 docker compose up --build  # app on http://localhost:8000
 ```
